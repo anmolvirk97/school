@@ -1,5 +1,5 @@
 // ===== CONFIG: paste your Cloudflare Worker URL. Empty = demo mode (data stays in this browser) =====
-const WORKER_URL = "";
+const WORKER_URL = "https://school-api.anmolvirk1997.workers.dev";
 const CLASSES=["7A","8B"], SUBJECTS=["Math","Science","English"];
 const DEMO=[["Aarav Singh","7A"],["Riya Sharma","7A"],["Rohan Verma","7A"],["Simran Kaur","7A"],["Ananya Gupta","7A"],["Rahul Yadav","7A"],["Kabir Malik","8B"],["Meera Joshi","8B"]].map((s,i)=>({id:"s"+i,name:s[0],cls:s[1]}));
 const $=id=>document.getElementById(id);let token=localStorage.tok||"",me=null,students=[],T={},marks={},letter="",pin="";
