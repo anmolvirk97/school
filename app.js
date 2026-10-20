@@ -11,14 +11,16 @@ async function api(method,path,body){
   if(method==="GET")return JSON.parse(localStorage["d_"+path]||"{}");
   localStorage["d_"+path]=JSON.stringify(body);return{ok:1};}
  const r=await fetch(WORKER_URL+"/"+path,{method,headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:body?JSON.stringify(body):undefined});
- const j=await r.json().catch(()=>({}));if(!r.ok)throw j.error||"Request failed";return j;}
+ const j=await r.json().catch(()=>({}));if(r.status===401&&path!=="login"){localStorage.removeItem("tok");alert(j.error||"Please log in again");location.reload();}
+ if(!r.ok)throw j.error||"Request failed";return j;}
 
+const deviceId=()=>localStorage.did||(localStorage.did=crypto.randomUUID());
 // ----- login -----
 function drawPad(){$("dots").innerHTML=[0,1,2,3,4,5].map(i=>`<i class="${i<pin.length?"f":""}"></i>`).join("");}
 $("pad").innerHTML=[1,2,3,4,5,6,7,8,9,"⌫",0,"Go"].map(k=>`<button data-k="${k}">${k}</button>`).join("");
 $("pad").onclick=async e=>{const k=e.target.dataset.k;if(!k)return;
  if(k==="⌫")pin=pin.slice(0,-1);else if(k==="Go"){
-  try{const r=await api("POST","login",{username:$("user").value.trim(),pin});token=r.token;localStorage.tok=token;me=r.user;start();}
+  try{const r=await api("POST","login",{username:$("user").value.trim(),pin,device:deviceId(),label:navigator.userAgent.slice(0,60)});token=r.token;localStorage.tok=token;me=r.user;start();}
   catch(x){$("err").textContent=x;pin="";}}
  else if(pin.length<6)pin+=k;drawPad();};drawPad();
 
@@ -33,7 +35,7 @@ async function start(){
 
 // ----- nav -----
 function show(v){["home","marks"].forEach(x=>$(x).classList.toggle("hide",x!==v));document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));}
-document.querySelector("nav").onclick=e=>{const v=e.target.dataset.v;if(!v)return;if(v==="out"){localStorage.removeItem("tok");location.reload();}else show(v);};
+document.querySelector("nav").onclick=e=>{const v=e.target.dataset.v;if(!v)return;if(v==="out"){api("POST","logout").catch(()=>{}).finally(()=>{localStorage.removeItem("tok");location.reload();});}else show(v);};
 
 // ----- marks entry (alphabet flow) -----
 $("go").onclick=async()=>{const max=+$("max").value;if(!$("tname").value||!max)return alert("Add a test name and max marks.");
