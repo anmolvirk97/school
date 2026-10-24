@@ -146,3 +146,4 @@ nav button.on{transition:background .15s}
 .mcn{display:flex;justify-content:space-between;gap:6px}.mcr{text-align:right}.mcl{border-bottom:1px solid #000;height:12px}
 .sig2{display:flex;justify-content:space-between;gap:10px;margin-top:auto}.sig2 span{border-top:1px solid #000;padding-top:2px;flex:1;text-align:center;font-size:9px}.sig2 img{display:block;max-height:22px;margin:0 auto}
 @media print{.sig span{position:relative}}
+.mrow{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}.mrow select{max-width:56%;min-width:0}.mrow b{overflow-wrap:anywhere}
