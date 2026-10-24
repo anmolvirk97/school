@@ -1191,13 +1191,13 @@ A.xGo = b => busy(b, async () => {
 
 /* ----- import: reads a file exported by this app (same sheets and columns) ----- */
 function importHTML() {
-  return `<div class="card" id="icard"><h3>Import from Excel</h3><p class="sub">Choose a file exported from this app (same sheets and columns). You see a summary before anything is saved. Only the classes and subjects you can edit are imported.</p><input type="file" id="xfile" accept=".xlsx,.xls" aria-label="Excel file"><p></p><button class="btn" data-a="impRead">Read file</button><div class="err" id="ierr" role="alert"></div></div>`;
+  return `<div class="card" id="icard"><h3>Import from Excel</h3><p class="sub">Choose a file exported from this app (same sheets and columns). You see a summary before anything is saved. Only the classes and subjects you can edit are imported.</p><input type="file" id="xfile" accept=".xlsx,.xls" aria-label="Excel file"><p></p><button class="btn" data-a="impRead">Read file</button><div class="err" id="ierr" role="alert"></div><div id="impu">${impUndoHTML()}</div></div>`;
 }
 let IMP = null;
 const nd = v => { if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
 async function impPlan(wb) {
   const R = { ops: {}, n: 0, cnt: {}, warn: [] }, now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
-  const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
+  R.undo = {}; const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (getAt(D[path] || {}, op.k.split(".")) == null) (R.undo[path] = R.undo[path] || []).push(op.k); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
   const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; };
   const ld = async p => { if (!seen.has(p)) { seen.add(p); await load([p], true); } return D[p] || {}; };
   const stu = (c, n) => { const k = String(n).trim().toLowerCase(); return classStudents(c).find(s => s.name.toLowerCase() === k); };
@@ -1221,7 +1221,7 @@ async function impPlan(wb) {
     const ch = (await ld(P.syl(c, sb))).chapters || []; if (!ch.length) { skip(`${c} ${sb}: set the chapters first`); continue; }
     const mp = {}; str(r["Chapter details"]).split(";").forEach(x => { const i = x.lastIndexOf(":"); if (i > 0) mp[x.slice(0, i).trim()] = x.slice(i + 1).trim().toLowerCase(); });
     const e = { s: ch.map(x => ({ done: 1, partial: 2 }[mp[x.n]] || 0)), by, t: now }; if (str(r.Remark)) e.r = str(r.Remark);
-    put(P.nb(c, sb), { k: `entries.${date}.${s.id}`, v: e }, "Notebook entries");
+    await ld(P.nb(c, sb)); put(P.nb(c, sb), { k: `entries.${date}.${s.id}`, v: e }, "Notebook entries");
   }
   for (const r of rows("Calls record")) {
     const c = str(r.Class), date = nd(r.Date); if (!canInch(c)) { skip(`${c}: calls need the class incharge`); continue; }
@@ -1243,12 +1243,12 @@ async function impPlan(wb) {
     const s = stu(c, r.Student), y = +(/^(\d{4})/.exec(str(r.Year)) || [])[1]; if (!s || !y) { skip(`fee row for “${str(r.Student)}”`); continue; }
     const ms = {}; fyMonths(y).forEach(m => { const v = str(r[m.n]).toLowerCase(); if (v === "full") ms[m.k] = 2; else if (v === "half") ms[m.k] = 1; });
     const total = +r["Total fee"] || 0, paid = r.Paid === "" ? NaN : +r.Paid;
-    put(P.k("fees", c), { k: `${fyKey(y)}.${s.id}`, v: Object.assign({ months: ms, by, t: now }, total ? { total } : {}, isNaN(paid) ? {} : { paid }) }, "Fee records");
+    await ld(P.k("fees", c)); put(P.k("fees", c), { k: `${fyKey(y)}.${s.id}`, v: Object.assign({ months: ms, by, t: now }, total ? { total } : {}, isNaN(paid) ? {} : { paid }) }, "Fee records");
   }
   for (const r of rows("Attendance")) {
     const c = str(r.Class); if (!canInch(c)) { skip(`${c}: attendance needs the class incharge`); continue; }
     const s = stu(c, r.Student), m = /^\d{4}-\d{2}$/.test(str(r.Month)) ? str(r.Month) : nd(r.Month).slice(0, 7); if (!s || !m) { skip(`attendance row for “${str(r.Student)}”`); continue; }
-    const path = P.k("attendance", c); put(path, { k: `${m}.${s.id}`, v: { a: +r["Absent days"] || 0, l: +r.Leaves || 0, by, t: now } }, "Attendance");
+    const path = P.k("attendance", c); await ld(path); put(path, { k: `${m}.${s.id}`, v: { a: +r["Absent days"] || 0, l: +r.Leaves || 0, by, t: now } }, "Attendance");
     if (r["Working days"] !== "") put(path, { k: `${m}._wd`, v: +r["Working days"] });
   }
   R.warn = [...bad]; R.sum = Object.entries(R.cnt); return R;
@@ -1263,9 +1263,30 @@ A.impGo = b => busy(b, async () => {
   let done = 0;
   try { for (const p of Object.keys(IMP.ops)) for (const part of chunk(IMP.ops[p], 150)) { await patch(p, part); done += part.length; b.textContent = "Importing… " + done; } }
   catch (x) { return toast("Stopped: " + x.message + " (" + done + " changes were saved)", true); }
-  const n = IMP.n; IMP = null; closeSheet(true); toast(n + " records imported");
+  const n = IMP.n; impLogPush({ t: Date.now(), n, undo: IMP.undo }); IMP = null; closeSheet(true); toast(n + " records imported"); if ($("impu")) $("impu").innerHTML = impUndoHTML();
 });
 
+
+/* ----- undo: the app remembers what each import created (on this device) and can remove exactly that ----- */
+const impLog = () => { try { return JSON.parse(localStorage.impLog || "[]"); } catch { return []; } };
+const impLogPush = b => { const l = impLog(); l.push(b); try { localStorage.impLog = JSON.stringify(l.slice(-10)); } catch { } };
+function impUndoHTML() {
+  const l = impLog(), b = l[l.length - 1]; if (!b) return "";
+  const n = Object.values(b.undo || {}).reduce((a, k) => a + k.length, 0);
+  return `<hr><p class="sub">Last import: <b>${b.n}</b> records on ${new Date(b.t).toLocaleString("en-IN")}. Undo removes only the entries that import created (nothing that existed before it).</p><button class="btn alt" data-a="impUndo">Undo last import (${n} items)</button>`;
+}
+A.impUndo = b => busy(b, async () => {
+  const l = impLog(), last = l[l.length - 1]; if (!last) return;
+  if (!confirm("Delete everything created by the last import? This cannot be undone.")) return;
+  let done = 0;
+  try {
+    for (const [path, keys] of Object.entries(last.undo || {})) {
+      const ops = keys.map(k => ({ k, v: null })); keys.filter(k => /^tests\.[\w-]+$/.test(k)).forEach(k => ops.push({ k: "marks." + k.slice(6), v: null }));
+      await load([path], true); for (const part of chunk(ops, 150)) { await patch(path, part); done += part.length; }
+    }
+  } catch (x) { return toast("Stopped: " + x.message + " (" + done + " removed)", true); }
+  l.pop(); localStorage.impLog = JSON.stringify(l); $("impu").innerHTML = impUndoHTML(); toast("Import undone");
+});
 /* ===== app.js ===== */
 /* ===== App shell: login, navigation, dashboard, profile ===== */
 let cur = "home", pin = "", sel = "", sw = false;
