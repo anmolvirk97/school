@@ -668,9 +668,9 @@ V.cls = async host => {
 A.cClass = b => { C.cls = b.value; LG = {}; $("cbody").innerHTML = SK; const t = VT; bundleFast(C.cls, () => { if (!stale(t)) cTab(); }); };
 A.cGo = b => { C.tab = b.dataset.t; cTab(); };
 function cTab() {
-  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees", att: "Attendance" };
+  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees", att: "Attendance", stu: "Students" };
   $("ctabs").innerHTML = Object.entries(T).map(([k, v]) => `<button class="${C.tab === k ? "on" : ""}" data-a="cGo" data-t="${k}">${v}</button>`).join("");
-  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee, att: cAtt })[C.tab]($("cbody"));
+  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee, att: cAtt, stu: cStu })[C.tab]($("cbody"));
 }
 
 /* ----- weekly monitors: automatic round-robin, incharge can override ----- */
@@ -885,6 +885,31 @@ function attHTML(cls, sid) {
   return rows.map(x => `<div class="li"><span>${esc(monthLabel(x.m))}</span><b>${x.a} absent · ${x.l} leave</b></div>`).join("") + `<div class="li"><span>Total</span><b>${rows.reduce((n, x) => n + x.a, 0)} absent · ${rows.reduce((n, x) => n + x.l, 0)} leave</b></div>`;
 }
 
+
+/* ----- students: the class incharge can add and correct students of their own class ----- */
+function cStu(host) {
+  const list = classStudents(C.cls);
+  host.innerHTML = `<div class="row"><button class="btn" data-a="cuEdit" data-id="">Add student</button><button class="btn alt" data-a="cuBulk">Add several</button></div><div class="card"><b>${list.length} students in ${esc(C.cls)}</b>${list.map(s => `<div class="li"><span>${esc(s.name)}${s.roll ? ` <small class="sub">roll ${esc(s.roll)}</small>` : ""}</span><button class="link" data-a="cuEdit" data-id="${esc(s.id)}">Edit</button></div>`).join("") || `<p class="sub">No students yet.</p>`}</div><p class="sub">Use Edit to fix a spelling. Removing a student is done by the admin.</p>`;
+}
+A.cuEdit = b => {
+  const s = stuById(b.dataset.id) || { id: "", name: "", roll: "" };
+  sheet(`<h2>${s.id ? "Edit student" : "Add student to " + esc(C.cls)}</h2><div class="form"><input id="sn" placeholder="Full name" value="${esc(s.name)}" autofocus><input id="sr" placeholder="Roll no. (optional)" value="${esc(s.roll || "")}"></div><p></p><div class="row"><button class="btn" data-a="cuSave" data-id="${esc(s.id)}" style="flex:2">Save</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+};
+A.cuSave = b => busy(b, async () => {
+  const name = $("sn").value.trim(), roll = $("sr").value.trim(); if (!name) return $("e2").textContent = "Enter a name.";
+  try {
+    if (b.dataset.id) upsertStu((await api("POST", "/students/update", { id: b.dataset.id, name, roll })).student);
+    else { const r = await api("POST", "/students/add", { students: [{ name, cls: C.cls, roll }] }); upsertStu(r.students[0]); if (!r.created.length) toast("That student is already in the class."); }
+  } catch (x) { return $("e2").textContent = x.message; }
+  closeSheet(true); cStu($("cbody"));
+});
+A.cuBulk = () => sheet(`<h2>Add several students</h2><p class="sub">One per line: <b>Name</b> or <b>Name, roll no.</b>. Students already in ${esc(C.cls)} are kept as they are.</p><textarea id="sb" rows="8" autofocus></textarea><p></p><div class="row"><button class="btn" data-a="cuBulkGo" style="flex:2">Add</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+A.cuBulkGo = b => busy(b, async () => {
+  const list = $("sb").value.split("\n").map(l => l.trim()).filter(Boolean).map(l => { const [name, roll] = l.split(",").map(x => x.trim()); return { name, cls: C.cls, roll }; });
+  if (!list.length) return $("e2").textContent = "Type at least one name.";
+  try { const r = await api("POST", "/students/add", { students: list }); r.students.forEach(upsertStu); closeSheet(true); toast(r.created.length + " added" + (r.students.length > r.created.length ? ", " + (r.students.length - r.created.length) + " already existed" : "")); } catch (x) { return $("e2").textContent = x.message; }
+  cStu($("cbody"));
+});
 /* ===== insights.js ===== */
 /* ===== Insights: class analytics, single-student page, printable reports ===== */
 const I = { cls: "", tab: "ov", sid: "" };
@@ -1195,12 +1220,13 @@ function importHTML() {
 }
 let IMP = null;
 const nd = v => { if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
-async function impPlan(wb) {
+const nk = n => String(n ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+async function impPlan(wb, alias = {}) {
   const R = { ops: {}, n: 0, cnt: {}, warn: [] }, now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
   R.undo = {}; const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (getAt(D[path] || {}, op.k.split(".")) == null) (R.undo[path] = R.undo[path] || []).push(op.k); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
   const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; };
   const ld = async p => { if (!seen.has(p)) { seen.add(p); await load([p], true); } return D[p] || {}; };
-  const stu = (c, n) => { const k = String(n).trim().toLowerCase(); return classStudents(c).find(s => s.name.toLowerCase() === k); };
+  const stu = (c, n) => { const a = alias[c + "|" + nk(n)]; if (a) return a === "skip" ? undefined : stuById(a); return classStudents(c).find(s => nk(s.name) === nk(n)); };
   const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c), skip = m => bad.add(m);
   const str = v => String(v ?? "").trim();
   for (const r of rows("Test record")) {
@@ -1253,17 +1279,56 @@ async function impPlan(wb) {
   }
   R.warn = [...bad]; R.sum = Object.entries(R.cnt); return R;
 }
+/* find names in the file that are not in the student list */
+function impScan(wb) {
+  const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; }, str = v => String(v ?? "").trim(), seen = {};
+  const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c);
+  const chk = (c, name, ok) => { if (!ok || !name || !S.cfg.classes.includes(c) || classStudents(c).some(s => nk(s.name) === nk(name))) return; (seen[c + "|" + nk(name)] = seen[c + "|" + nk(name)] || { c, name: name.replace(/\s+/g, " "), n: 0 }).n++; };
+  rows("Test record").forEach(r => { const rem = str(r.Remark).toLowerCase(); if (rem === "not entered" || (r.Marks === "" && rem !== "absent")) return; chk(str(r.Class), str(r.Student), canSub(str(r.Class), str(r.Subject))); });
+  rows("Notebook record").forEach(r => chk(str(r.Class), str(r.Student), canSub(str(r.Class), str(r.Subject))));
+  ["Calls record", "Fines record", "Fees", "Attendance"].forEach(n => rows(n).forEach(r => chk(str(r.Class), str(r.Student), canInch(str(r.Class)))));
+  return Object.values(seen);
+}
+function lev(a, b) { const m = a.length, n = b.length; if (!m || !n) return Math.max(m, n); let p = Array.from({ length: n + 1 }, (_, j) => j); for (let i = 1; i <= m; i++) { const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; }
+const nameSim = (a, b) => { const f = (x, y) => 1 - lev(x, y) / Math.max(x.length, y.length, 1), srt = s => s.split(" ").sort().join(" "); return Math.max(f(a, b), f(srt(a), srt(b))); };
+const upsertStu = r => { const i = S.students.findIndex(x => x.id === r.id); i < 0 ? S.students.push(r) : S.students[i] = r; };
+let IM = null;
 A.impRead = b => busy(b, async () => {
   $("ierr").textContent = ""; const f = $("xfile").files[0]; if (!f) return $("ierr").textContent = "Choose an Excel file first.";
-  try { await loadXlsx(); IMP = await impPlan(XLSX.read(await f.arrayBuffer(), { type: "array" })); } catch (e) { return $("ierr").textContent = e.message || "Could not read this file."; }
-  if (!IMP.n) return $("ierr").textContent = "Nothing to import. " + (IMP.warn.slice(0, 3).join(" · ") || "No sheets in the expected format were found.");
-  sheetL(`<h2>Ready to import</h2><div class="hist">${IMP.sum.map(x => `<div class="hr"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join("")}</div>${IMP.warn.length ? `<p class="sub">Skipped: ${IMP.warn.slice(0, 6).map(esc).join(" · ")}${IMP.warn.length > 6 ? ` … and ${IMP.warn.length - 6} more` : ""}</p>` : ""}<p class="sub">Existing entries for the same student and test / date are replaced.</p><div class="row"><button class="btn" data-a="impGo" style="flex:2">Import ${IMP.n} records</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+  try {
+    await loadXlsx(); const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), un = impScan(wb), inch = inchargeClasses();
+    if (un.length) {
+      IM = { wb, list: un.map(u => { const k = nk(u.name), cands = classStudents(u.c).map(s => ({ id: s.id, name: s.name, sc: nameSim(k, nk(s.name)) })).sort((x, y) => y.sc - x.sc).slice(0, 12), best = cands[0], canNew = inch.includes(u.c); cands.forEach(c => c.best = c === best && c.sc >= .6); return Object.assign(u, { cands, canNew, sel: best && best.sc >= .85 ? best.id : canNew ? "new" : "skip" }); }) };
+      return impMatchDraw();
+    }
+    await impFinish(wb, {}, []);
+  } catch (e) { $("ierr").textContent = e.message || "Could not read this file."; }
 });
+function impMatchDraw() {
+  sheetL(`<h2>Students not found</h2><p class="sub">${IM.list.length} ${IM.list.length === 1 ? "name" : "names"} in the file ${IM.list.length === 1 ? "is" : "are"} not in the student list. For each one, create a new student, choose the existing student it really is (spelling difference), or skip its rows.</p><div class="row"><button class="btn alt sm" data-a="imAll" data-v="new">Create all as new</button><button class="btn alt sm" data-a="imAll" data-v="skip">Skip all</button></div>
+   <div class="mlist">${IM.list.map((r, i) => `<div class="mrow"><div><b>${esc(r.name)}</b><br><small>Class ${esc(r.c)} · ${r.n} ${r.n === 1 ? "row" : "rows"}</small></div><select data-c="imSel" data-i="${i}" aria-label="Match ${esc(r.name)}">${r.canNew ? `<option value="new" ${r.sel === "new" ? "selected" : ""}>Create new student</option>` : ""}<option value="skip" ${r.sel === "skip" ? "selected" : ""}>Skip these rows</option>${r.cands.map(c => `<option value="${esc(c.id)}" ${r.sel === c.id ? "selected" : ""}>= ${esc(c.name)}${c.best ? " (closest)" : ""}</option>`).join("")}</select></div>`).join("")}</div>
+   <p class="sub">New students are added to the class as soon as you continue. Only the class incharge or admin can create students.</p><div class="row"><button class="btn" data-a="imMatchGo" style="flex:2">Continue</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+}
+A.imSel = b => { IM.list[+b.dataset.i].sel = b.value; };
+A.imAll = b => { IM.list.forEach(r => r.sel = b.dataset.v === "new" && r.canNew ? "new" : "skip"); impMatchDraw(); };
+A.imMatchGo = b => busy(b, async () => {
+  const alias = {}, byCls = {}, created = [];
+  IM.list.forEach(r => { const k = r.c + "|" + nk(r.name); if (r.sel === "skip") alias[k] = "skip"; else if (r.sel === "new") (byCls[r.c] = byCls[r.c] || []).push(r); else alias[k] = r.sel; });
+  try {
+    for (const [c, rs] of Object.entries(byCls)) { const res = await api("POST", "/students/add", { students: rs.map(r => ({ name: r.name, cls: c })) }); res.students.forEach((st, i) => { upsertStu(st); alias[c + "|" + nk(rs[i].name)] = st.id; if (res.created.includes(st.id)) created.push(st.id); }); }
+    await impFinish(IM.wb, alias, created);
+  } catch (x) { toast(x.message, true); }
+});
+async function impFinish(wb, alias, created) {
+  IMP = await impPlan(wb, alias); IMP.stu = created;
+  if (!IMP.n) { if (!$("ierr")) closeSheet(true); const m = "Nothing to import. " + (IMP.warn.slice(0, 3).join(" · ") || "No sheets in the expected format were found."); if ($("ierr")) $("ierr").textContent = m; throw new Error(m); }
+  sheetL(`<h2>Ready to import</h2><div class="hist">${created.length ? `<div class="hr"><span>New students created</span><b>${created.length}</b></div>` : ""}${IMP.sum.map(x => `<div class="hr"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join("")}</div>${IMP.warn.length ? `<p class="sub">Skipped: ${IMP.warn.slice(0, 6).map(esc).join(" · ")}${IMP.warn.length > 6 ? ` … and ${IMP.warn.length - 6} more` : ""}</p>` : ""}<p class="sub">Existing entries for the same student and test / date are replaced.</p><div class="row"><button class="btn" data-a="impGo" style="flex:2">Import ${IMP.n} records</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+}
 A.impGo = b => busy(b, async () => {
   let done = 0;
   try { for (const p of Object.keys(IMP.ops)) for (const part of chunk(IMP.ops[p], 150)) { await patch(p, part); done += part.length; b.textContent = "Importing… " + done; } }
   catch (x) { return toast("Stopped: " + x.message + " (" + done + " changes were saved)", true); }
-  const n = IMP.n; impLogPush({ t: Date.now(), n, undo: IMP.undo }); IMP = null; closeSheet(true); toast(n + " records imported"); if ($("impu")) $("impu").innerHTML = impUndoHTML();
+  const n = IMP.n; impLogPush({ t: Date.now(), n, undo: IMP.undo, stu: IMP.stu || [] }); IMP = null; closeSheet(true); toast(n + " records imported"); if ($("impu")) $("impu").innerHTML = impUndoHTML();
 });
 
 
@@ -1273,11 +1338,11 @@ const impLogPush = b => { const l = impLog(); l.push(b); try { localStorage.impL
 function impUndoHTML() {
   const l = impLog(), b = l[l.length - 1]; if (!b) return "";
   const n = Object.values(b.undo || {}).reduce((a, k) => a + k.length, 0);
-  return `<hr><p class="sub">Last import: <b>${b.n}</b> records on ${new Date(b.t).toLocaleString("en-IN")}. Undo removes only the entries that import created (nothing that existed before it).</p><button class="btn alt" data-a="impUndo">Undo last import (${n} items)</button>`;
+  return `<hr><p class="sub">Last import: <b>${b.n}</b> records on ${new Date(b.t).toLocaleString("en-IN")}. Undo removes only the entries that import created${(b.stu || []).length ? ` and the ${b.stu.length} new students it added` : ""} (nothing that existed before it).</p><button class="btn alt" data-a="impUndo">Undo last import (${n} items)</button>`;
 }
 A.impUndo = b => busy(b, async () => {
   const l = impLog(), last = l[l.length - 1]; if (!last) return;
-  if (!confirm("Delete everything created by the last import? This cannot be undone.")) return;
+  if (!confirm("Delete everything created by the last import" + ((last.stu || []).length ? ", including the " + last.stu.length + " students it added" : "") + "? This cannot be undone.")) return;
   let done = 0;
   try {
     for (const [path, keys] of Object.entries(last.undo || {})) {
@@ -1285,6 +1350,7 @@ A.impUndo = b => busy(b, async () => {
       await load([path], true); for (const part of chunk(ops, 150)) { await patch(path, part); done += part.length; }
     }
   } catch (x) { return toast("Stopped: " + x.message + " (" + done + " removed)", true); }
+  if ((last.stu || []).length) { try { await api("POST", "/students/remove", { ids: last.stu }); S.students = S.students.filter(x => !last.stu.includes(x.id)); } catch (x) { toast("Entries removed, but the new students stayed: " + x.message, true); } }
   l.pop(); localStorage.impLog = JSON.stringify(l); $("impu").innerHTML = impUndoHTML(); toast("Import undone");
 });
 /* ===== app.js ===== */
