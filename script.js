@@ -112,7 +112,9 @@ function conflictSheet(title, theirs, mine, keepAct, mineAct, extra) {
 
 /* ---------- bottom sheet (entry card) with unsaved-change guard ---------- */
 let dirty = false;
-function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) f.focus(); }
+const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
+const sheetL = h => { sheet(h); $("sheet").oninput = null; };
 function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); $("sheet").classList.add("hide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").classList.contains("hide")) closeSheet(); });
@@ -144,7 +146,7 @@ const ENT = {};
 function entry(host, o) {      // o: {id, cls, done(s), tail(s), pick(sid), counter=true, note}
   ENT[o.id] = Object.assign({ letter: "", q: "", counter: true }, o);
   host.innerHTML = `<div class="card entry"><div class="row between"><b id="${o.id}-cnt" class="cnt"></b><input id="${o.id}-q" class="find" placeholder="Search name" aria-label="Search student"></div>
-   <div class="bar"><i id="${o.id}-bar"></i></div>${o.note ? `<div class="notes">${o.note}</div>` : ""}
+   <div class="bar"><i id="${o.id}-bar"></i></div>${o.note ? `<div class="notes">${o.note}</div>` : ""}${o.tools ? `<div class="row tools">${o.tools}</div>` : ""}
    <div class="eflow"><div class="alpha" id="${o.id}-al" role="group" aria-label="Jump to letter"></div><div id="${o.id}-ls" class="elist"></div></div></div>`;
   $(o.id + "-q").oninput = e => { ENT[o.id].q = e.target.value.toLowerCase(); entryDraw(o.id); };
   entryDraw(o.id);
@@ -154,11 +156,11 @@ function entryDraw(id) {
   $(id + "-cnt").textContent = o.counter ? `${done}/${all.length} entered` : `${all.length} students`; $(id + "-bar").style.width = (o.counter && all.length ? done / all.length * 100 : 0) + "%";
   $(id + "-bar").parentNode.classList.toggle("hide", !o.counter);
   const has = new Set(all.map(s => s.name[0].toUpperCase()));
-  $(id + "-al").innerHTML = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => `<button data-a="eLetter" data-e="${id}" data-l="${l}" class="${l === o.letter ? "on" : ""}" ${has.has(l) ? "" : "disabled"}>${l}</button>`).join("");
+  $(id + "-al").innerHTML = `<button data-a="eLetter" data-e="${id}" data-l="" class="all ${o.letter || o.q ? "" : "on"}">All</button>` + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => `<button data-a="eLetter" data-e="${id}" data-l="${l}" class="${l === o.letter ? "on" : ""}" ${has.has(l) ? "" : "disabled"}>${l}</button>`).join("");
   const list = all.filter(s => o.q ? s.name.toLowerCase().includes(o.q) : (!o.letter || s.name[0].toUpperCase() === o.letter));
   $(id + "-ls").innerHTML = list.map(s => `<button class="st ${o.done(s) ? "done" : ""}" data-a="ePick" data-e="${id}" data-id="${esc(s.id)}"><span>${esc(s.name)}</span><span class="tail">${o.tail ? o.tail(s) : ""}</span></button>`).join("") || `<p class="sub">No students found.</p>`;
 }
-A.eLetter = b => { const o = ENT[b.dataset.e]; o.letter = o.letter === b.dataset.l ? "" : b.dataset.l; entryDraw(b.dataset.e); };
+A.eLetter = b => { const o = ENT[b.dataset.e], l = b.dataset.l; o.letter = !l || o.letter === l ? "" : l; o.q = ""; const q = $(o.id + "-q"); if (q) q.value = ""; entryDraw(o.id); };
 A.ePick = b => ENT[b.dataset.e].pick(b.dataset.id);
 function entryNext(id, sid) {      // next student who still has no entry; null when everyone is done
   const o = ENT[id], all = classStudents(o.cls), i = all.findIndex(s => s.id === sid);
@@ -188,7 +190,7 @@ const V = {};
 let VT = 0; const stale = t => t !== VT;                    // VT changes on every page switch, so slow loads never paint over a newer page
 const SK = `<div class="skw" aria-busy="true" aria-label="Loading"><div class="sk" style="height:44px;width:55%"></div><div class="skg"><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div></div><div class="sk" style="height:230px"></div><div class="sk" style="height:140px"></div></div>`;
 /* Show saved data instantly (stale-while-revalidate), then fetch fresh data and redraw only if something changed. */
-function bundlePaths(cls) { const p = []; subjectsOf(cls).forEach(s => p.push(P.marks(cls, s), P.nb(cls, s), P.syl(cls, s))); if (inchargeClasses().includes(cls)) ["fines", "calls", "fees", "monitors"].forEach(k => p.push(P.k(k, cls))); return p; }
+function bundlePaths(cls) { const p = []; subjectsOf(cls).forEach(s => p.push(P.marks(cls, s), P.nb(cls, s), P.syl(cls, s))); if (inchargeClasses().includes(cls)) ["fines", "calls", "fees", "monitors", "attendance"].forEach(k => p.push(P.k(k, cls))); return p; }
 async function bundleFast(cls, render, quiet) {
   const paths = bundlePaths(cls);
   paths.forEach(p => { if (!(p in D)) { try { const c = localStorage["c_" + p]; if (c) D[p] = JSON.parse(c); } catch { } } });
@@ -210,7 +212,7 @@ const setTitle = (t, s) => { $("ttl").textContent = t; $("sbt").textContent = s 
 const P = { marks: (c, s) => `data/marks/${c}_${s}.json`, nb: (c, s) => `data/notebook/${c}_${s}.json`, syl: (c, s) => `data/syllabus/${c}_${s}.json`, k: (k, c) => `data/${k}/${c}.json` };
 async function bundle(cls, force) {
   const paths = []; subjectsOf(cls).forEach(s => paths.push(P.marks(cls, s), P.nb(cls, s), P.syl(cls, s)));
-  const inch = inchargeClasses().includes(cls); if (inch) ["fines", "calls", "fees", "monitors"].forEach(k => paths.push(P.k(k, cls)));
+  const inch = inchargeClasses().includes(cls); if (inch) ["fines", "calls", "fees", "monitors", "attendance"].forEach(k => paths.push(P.k(k, cls)));
   await load(paths, force); return { cls, inch };
 }
 const FD = (k, c) => D[P.k(k, c)] || {};
@@ -221,7 +223,7 @@ function stats(cls) {
     const mf = D[P.marks(cls, sub)] || {};
     Object.entries(mf.tests || {}).forEach(([tid, t]) => {
       const ms = (mf.marks || {})[tid] || {}, vals = [];
-      Object.entries(ms).forEach(([sid, e]) => { if (!st[sid]) return; const p = e.m / e.max * 100; st[sid].pts.push({ x: t.name, y: p, date: t.date, sub }); (st[sid].sub[sub] = st[sid].sub[sub] || []).push(p); vals.push(p); });
+      Object.entries(ms).forEach(([sid, e]) => { if (!st[sid] || e.ab) return; const p = e.m / e.max * 100; st[sid].pts.push({ x: t.name, y: p, date: t.date, sub, term: !!t.term }); (st[sid].sub[sub] = st[sid].sub[sub] || []).push(p); vals.push(p); });
       tests.push({ sub, tid, name: t.name, date: t.date, max: t.max, n: vals.length, avg: avg(vals) });
     });
     const ch = (D[P.syl(cls, sub)] || {}).chapters || [], tc = ch.filter(taught).length, en = (D[P.nb(cls, sub)] || {}).entries || {};
@@ -252,53 +254,124 @@ const weekIdx = d => Math.floor((d.getTime() / 864e5 + 3) / 7);
 
 /* ===== modules.js ===== */
 /* ===== Test marks + Notebooks ===== */
-let M = {};
+let M = {}, MH = { all: false };
 const mk = sid => getAt(D[M.path] || {}, ["marks", M.tid, sid]);
+const mTxt = e => e.ab ? "Absent" : e.m + "/" + e.max;
 
 V.marks = async host => {
   setTitle("Test marks", "Set the test once, then tap names to enter marks.");
   if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}<input id="tname" placeholder="Test name (e.g. Unit 1)"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div>
-   <div id="tchips" class="row chips"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div><div id="mentry"></div>`;
-  fillPair("m"); A.pairDone_m = mTests; mTests();
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div class="row"><input id="tname" placeholder="Test name (e.g. Unit 1)"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
+   <div id="mhist"></div><div id="mentry"></div>`;
+  fillPair("m"); A.pairDone_m = mHist; mHist();
 };
-async function mTests() {
-  const c = $("mc").value, s = $("ms").value; if (!c || !s) return;
-  const [f] = await load([`data/marks/${c}_${s}.json`], true), t = Object.entries(f.tests || {}).sort((a, b) => b[1].date.localeCompare(a[1].date)).slice(0, 6);
-  $("tchips").innerHTML = t.length ? `<span class="sub" style="margin:8px 4px">Resume:</span>` + t.map(([id, x]) => `<button class="chip" data-a="mResume" data-t="${esc(id)}">${esc(x.name)} · ${fmtD(x.date)} · /${x.max}</button>`).join("") : "";
+/* test history: every test of the chosen class + subject, with open / edit / delete */
+async function mHist() {
+  const c = $("mc") && $("mc").value, s = $("ms") && $("ms").value; if (!c || !s || !$("mhist")) return;
+  const path = P.marks(c, s); await load([path], true);
+  if (!$("mhist") || $("mc").value !== c || $("ms").value !== s) return;
+  const f = D[path] || {}, all = Object.entries(f.tests || {}).sort((a, b) => b[1].date.localeCompare(a[1].date)), list = MH.all ? all : all.slice(0, 5), n = classStudents(c).length;
+  $("mhist").innerHTML = all.length ? `<div class="card"><div class="row between"><b>Test history · ${esc(c)} ${esc(s)}</b>${all.length > 5 ? `<button class="link" data-a="mHAll">${MH.all ? "Show recent" : "Show all " + all.length}</button>` : ""}</div>${list.map(([id, t]) => { const e = Object.keys((f.marks || {})[id] || {}).length; return `<div class="trow"><div><b>${esc(t.name)}</b>${t.term ? " " + pill("Term") : ""}<br><small>${fmtD(t.date)} · out of ${t.max} · ${e}/${n} entered</small></div><div class="row"><button class="btn alt sm" data-a="mResume" data-t="${esc(id)}">Open</button><button class="btn alt sm" data-a="mEditT" data-t="${esc(id)}">Edit</button><button class="btn alt sm" data-a="mDelT" data-t="${esc(id)}">Delete</button></div></div>`; }).join("")}</div>` : "";
 }
-A.mResume = b => { const t = D[`data/marks/${$("mc").value}_${$("ms").value}.json`].tests[b.dataset.t]; $("tname").value = t.name; $("max").value = t.max; $("tdate").value = t.date; A.mStart(b); };
+A.mHAll = () => { MH.all = !MH.all; mHist(); };
+A.mResume = b => busy(b, () => mRun($("mentry"), $("mc").value, $("ms").value, b.dataset.t));
 A.mStart = b => busy(b, async () => {
   const c = $("mc").value, s = $("ms").value, name = $("tname").value.trim(), max = +$("max").value, date = $("tdate").value;
   if (!name || !(max > 0) || !date) return toast("Add a test name, max marks and date.", true);
-  const path = `data/marks/${c}_${s}.json`; await load([path], true);
-  const tid = slug(name) + "_" + date; M = { path, cls: c, sub: s, tid };
-  if (!getAt(D[path], ["tests", tid])) await patch(path, [{ k: "tests." + tid, v: { name, date, max, by: S.me.name } }]);
-  M.max = D[path].tests[tid].max;
-  entry($("mentry"), { id: "m", cls: c, note: `<b>${esc(name)}</b> · ${esc(s)} · out of ${M.max}`, done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? `${e.m}/${e.max}` : ""; }, pick: mOpen });
-  $("mentry").scrollIntoView({ behavior: "smooth" });
+  const path = P.marks(c, s); await load([path], true);
+  const same = Object.entries(D[path].tests || {}).find(([, t]) => !t.term && t.name.toLowerCase() === name.toLowerCase() && t.date === date), tid = same ? same[0] : slug(name) + "_" + date;
+  if (!same) { try { await patch(path, [{ k: "tests." + tid, v: { name, date, max, by: S.me.name } }]); } catch (x) { return toast(x.message, true); } }
+  await mRun($("mentry"), c, s, tid); mHist();
 });
+/* open the name list for one test (used by unit tests and term exams) */
+async function mRun(host, c, s, tid, quiet) {
+  const path = P.marks(c, s); await load([path], true);
+  const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
+  M = { path, cls: c, sub: s, tid, max: t.max };
+  entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · out of ${t.max} · ${fmtD(t.date)}`,
+    tools: `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
+    done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? esc(mTxt(e)) : ""; }, pick: mOpen });
+  if (!quiet) host.scrollIntoView({ behavior: "smooth" });
+}
 function mOpen(id) {
   const s = stuById(id), e = mk(id) || { m: "", max: M.max, r: "" };
-  sheet(`<h2>${esc(s.name)}</h2><div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>
+  sheet(`<h2>${esc(s.name)}</h2>${e.ab ? `<p class="sub">Currently marked absent.</p>` : ""}<div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>
    <p><input id="mr" placeholder="Remark (optional)" value="${esc(e.r || "")}" style="width:100%"></p>
-   <div class="row"><button class="btn" data-a="mSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="mSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
+   <div class="row"><button class="btn" data-a="mSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="mSkip" data-id="${esc(id)}">Skip</button></div>
+   <div class="row"><button class="btn alt sm" data-a="mAbsOne" data-id="${esc(id)}">Absent / did not give test</button>${mk(id) ? `<button class="btn alt sm" data-a="mDelOne" data-id="${esc(id)}">Delete entry</button>` : ""}</div><div class="err" id="e2"></div>`);
   $("sheet").onkeydown = ev => { if (ev.key === "Enter") A.mSave($("sheet").querySelector("[data-a=mSave]")); };
 }
 A.mSkip = b => { if (!closeSheet()) return; const n = entryNext("m", b.dataset.id); n ? mOpen(n.id) : 0; };
-A.mSave = b => busy(b, async () => {
-  const id = b.dataset.id, v = $("mm").value, mx = +$("mx").value;
-  if (v === "" || +v < 0 || +v > mx) return $("e2").textContent = "Marks must be between 0 and " + mx + ".";
-  const old = mk(id), rec = { m: +v, max: mx, r: $("mr").value.trim(), by: S.me.name, t: Date.now() };
+async function mPut(id, rec) {
+  const old = mk(id);
   try { await patch(M.path, [{ k: `marks.${M.tid}.${id}`, v: rec, base: old && old.t != null ? old.t : null }]); }
   catch (x) { if (x.conflict) return mConflict(id, rec, x.conflict[0].current); return $("e2").textContent = x.message; }
   entryDraw("m"); const n = entryNext("m", id); dirty = false; n ? mOpen(n.id) : closeSheet(true);
+}
+A.mSave = b => busy(b, async () => {
+  const id = b.dataset.id, v = $("mm").value, mx = +$("mx").value;
+  if (v === "" || +v < 0 || +v > mx) return $("e2").textContent = "Marks must be between 0 and " + mx + ".";
+  return mPut(id, { m: +v, max: mx, r: $("mr").value.trim(), by: S.me.name, t: Date.now() });
 });
+A.mAbsOne = b => busy(b, () => mPut(b.dataset.id, { ab: 1, max: +$("mx").value || M.max, r: $("mr").value.trim(), by: S.me.name, t: Date.now() }));
+A.mDelOne = b => busy(b, async () => {
+  if (!confirm("Delete this student's entry for the test?")) return;
+  try { await patch(M.path, [{ k: `marks.${M.tid}.${b.dataset.id}`, v: null }]); } catch (x) { return $("e2").textContent = x.message; }
+  entryDraw("m"); closeSheet(true); toast("Entry deleted");
+});
+/* everyone without an entry = absent / did not give the test */
+A.mAbs = b => busy(b, async () => {
+  const rest = classStudents(M.cls).filter(s => !mk(s.id)); if (!rest.length) return toast("Everyone already has an entry.");
+  if (!confirm(`Mark the ${rest.length} students without marks as absent (did not give this test)?`)) return;
+  const ops = rest.map(s => ({ k: `marks.${M.tid}.${s.id}`, v: { ab: 1, max: M.max, r: "", by: S.me.name, t: Date.now() } }));
+  try { for (const part of chunk(ops, 150)) await patch(M.path, part); } catch (x) { return toast(x.message, true); }
+  entryDraw("m"); toast(rest.length + " marked absent");
+});
+/* list of saved entries: edit one, delete several */
+A.mManage = () => {
+  const rows = classStudents(M.cls).filter(s => mk(s.id)); if (!rows.length) return toast("No entries saved yet.", true);
+  sheetL(`<h2>Saved entries</h2><p class="sub">Tick entries to delete them, or tap Edit to correct marks.</p><div class="row"><button class="btn alt sm" data-a="mkAll">Select / clear all</button></div><div class="mlist">${rows.map(s => `<div class="lrow"><label class="cb"><input type="checkbox" class="mkc" value="${esc(s.id)}" aria-label="Select ${esc(s.name)}"></label><div class="lm"><b>${esc(s.name)}</b><small>${esc(mTxt(mk(s.id)))}</small></div><button class="link" data-a="mkEdit" data-id="${esc(s.id)}">Edit</button></div>`).join("")}</div><p></p><div class="row"><button class="btn" data-a="mkDel" style="flex:2">Delete selected</button><button class="btn alt" data-a="close">Close</button></div>`);
+};
+A.mkAll = () => { const cs = [...document.querySelectorAll(".mkc")], on = cs.some(c => !c.checked); cs.forEach(c => c.checked = on); };
+A.mkEdit = b => mOpen(b.dataset.id);
+A.mkDel = b => busy(b, async () => {
+  const ids = [...document.querySelectorAll(".mkc:checked")].map(c => c.value); if (!ids.length) return toast("Tick at least one entry.", true);
+  if (!confirm(`Delete ${ids.length} saved ${ids.length === 1 ? "entry" : "entries"}?`)) return;
+  try { for (const part of chunk(ids.map(id => ({ k: `marks.${M.tid}.${id}`, v: null })), 150)) await patch(M.path, part); } catch (x) { return toast(x.message, true); }
+  entryDraw("m"); closeSheet(true); toast(ids.length + " deleted");
+});
+/* edit the test itself: name, date, max marks */
+let ET = {};
+A.mEditT = b => {
+  const path = P.marks($("mc").value, $("ms").value), t = D[path].tests[b.dataset.t]; ET = { path, tid: b.dataset.t, t };
+  sheet(`<h2>Edit test</h2><div class="form"><label>Test name<input id="etn" value="${esc(t.name)}"></label><label>Date<input id="etd" type="date" value="${esc(t.date)}"></label><label>Max marks<input id="etm" type="number" inputmode="decimal" value="${t.max}"></label><label class="cb"><input type="checkbox" id="etu" checked> Also change “out of” on marks already entered</label></div><p></p><div class="row"><button class="btn" data-a="mEditSave" style="flex:2">Save changes</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+};
+A.mEditSave = b => busy(b, async () => {
+  const { path, tid, t } = ET, name = $("etn").value.trim(), date = $("etd").value, max = +$("etm").value;
+  if (!name || !date || !(max > 0)) return $("e2").textContent = "Fill in the name, date and max marks.";
+  const ms = (D[path].marks || {})[tid] || {}, ops = [{ k: "tests." + tid, v: Object.assign({}, t, { name, date, max }) }];
+  if (max !== t.max && $("etu").checked) {
+    const over = Object.values(ms).filter(e => !e.ab && e.m > max).length; if (over) return $("e2").textContent = over + " saved marks are higher than " + max + ". Correct them first.";
+    Object.entries(ms).forEach(([sid, e]) => { if (e.max === t.max) ops.push({ k: `marks.${tid}.${sid}`, v: Object.assign({}, e, { max }) }); });
+  }
+  try { for (const part of chunk(ops, 150)) await patch(path, part); } catch (x) { return $("e2").textContent = x.message; }
+  closeSheet(true); toast("Test updated"); mHist();
+  if (M.tid === tid && M.path === path) mRun($("mentry"), M.cls, M.sub, tid, true);
+});
+/* delete a whole test with all its marks */
+A.mDelT = async b => {
+  const c = $("mc").value, s = $("ms").value, path = P.marks(c, s), tid = b.dataset.t, t = D[path].tests[tid], ids = Object.keys((D[path].marks || {})[tid] || {});
+  if (!confirm(`Delete the test “${t.name}” (${fmtD(t.date)}) and its ${ids.length} saved marks? This cannot be undone.`)) return;
+  const ops = [...ids.map(id => ({ k: `marks.${tid}.${id}`, v: null })), { k: `marks.${tid}`, v: null }, { k: "tests." + tid, v: null }];
+  try { for (const part of chunk(ops, 150)) await patch(path, part); } catch (x) { return toast(x.message, true); }
+  if (M.tid === tid && M.path === path) { $("mentry").innerHTML = ""; M = {}; }
+  toast("Test deleted"); mHist();
+};
 let CF = {};
 function mConflict(id, mine, theirs) {
   CF = { id, mine, theirs };
   if (!theirs) return mOpen(id);
-  conflictSheet(stuById(id).name + ": already saved", { by: theirs.by, t: theirs.t, text: `${theirs.m}/${theirs.max}` }, { text: `${mine.m}/${mine.max}` }, "mKeep", "mMine");
+  conflictSheet(stuById(id).name + ": already saved", { by: theirs.by, t: theirs.t, text: mTxt(theirs) }, { text: mTxt(mine) }, "mKeep", "mMine");
 }
 A.mKeep = () => { setAt(M.path, `marks.${M.tid}.${CF.id}`, CF.theirs); try { localStorage["c_" + M.path] = JSON.stringify(D[M.path]); } catch { } entryDraw("m"); const n = entryNext("m", CF.id); dirty = false; n ? mOpen(n.id) : closeSheet(true); };
 A.mMine = b => busy(b, async () => {
@@ -332,7 +405,7 @@ A.nOpen = b => busy(b, async () => { if (!await nbLoad()) return; if (!N.ch.leng
 function nbDraw() {
   $("nbody").innerHTML = `<div class="seg" role="tablist"><button class="${N.view === "entry" ? "on" : ""}" data-a="nView" data-v="entry">Enter</button><button class="${N.view === "heat" ? "on" : ""}" data-a="nView" data-v="heat">Heatmap</button></div><div id="nmain"></div>`;
   if (N.view === "heat") return nbHeat();
-  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)} · ${N.ch.filter(taught).length} chapters being checked`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id); return e ? nbDone(e, N.ch) + "/" + N.ch.filter(taught).length : ""; }, pick: nOpenStu });
+  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)} · ${N.ch.filter(taught).length} chapters being checked`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id); return e ? nbDone(e, N.ch) + "/" + N.ch.filter(taught).length : ""; }, tools: `<button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
 }
 A.nView = b => { N.view = b.dataset.v; nbDraw(); };
 function nbHeat() {
@@ -366,7 +439,7 @@ function nsDraw() {
   $("sheet").innerHTML = `<div class="row between"><h2>${esc(s.name)}</h2><button class="link" data-a="nsMode">${NS.detail ? "Quick strip" : "Individual entry"}</button></div><p class="sub">${fmtD(N.date)} · ${esc(N.sub)} · ${NS.detail ? "Set each chapter and add remarks" : "Tap a chapter to cycle done → partial → pending"}</p>` +
     (NS.detail ? `<div class="chl">${N.ch.map((c, i) => `<div class="crow ${taught(c) ? "" : "dim"}"><span class="cl">${i + 1}. ${esc(c.n)}</span><select data-c="nsSel" data-i="${i}" ${taught(c) ? "" : "disabled"} aria-label="Chapter ${i + 1} status"><option value="1" ${NS.st[i] === 1 ? "selected" : ""}>Done</option><option value="2" ${NS.st[i] === 2 ? "selected" : ""}>Partial</option><option value="0" ${NS.st[i] === 0 ? "selected" : ""}>Pending</option></select><input class="cr" data-i="${i}" placeholder="Remark" value="${esc(NS.cr[i] || "")}" ${taught(c) ? "" : "disabled"}></div>`).join("")}</div><p><input id="nr" placeholder="Overall remark (optional)" value="${esc(NS.r)}" style="width:100%"></p>`
       : `<div class="chs">${N.ch.map((c, i) => `<button class="ch s${NS.st[i]}" data-a="nbCh" data-i="${i}" title="${esc(c.n)}" ${taught(c) ? "" : "disabled"}>Ch ${i + 1}<br>${taught(c) ? SYM[NS.st[i]] : "–"}</button>`).join("")}</div><p class="sub chnames">${N.ch.map((c, i) => `${i + 1}. ${esc(c.n)}`).join(" · ")}</p>`) +
-    `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div><p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div><div class="err" id="e2"></div>`;
+    `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div><p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div>${ne(NS.id) ? `<p></p><button class="btn alt sm" data-a="nsDel">Delete this entry</button>` : ""}<div class="err" id="e2"></div>`;
 }
 const nsKeep = () => { if (NS.detail) { document.querySelectorAll(".cr").forEach(i => { i.value.trim() ? NS.cr[i.dataset.i] = i.value.trim() : delete NS.cr[i.dataset.i]; }); const r = $("nr"); if (r) NS.r = r.value; } };
 A.nsMode = () => { nsKeep(); NS.detail = !NS.detail; nsDraw(); };
@@ -396,6 +469,185 @@ A.nMine = b => busy(b, async () => {
   nsDone(CF.id);
 });
 
+/* ===== term.js ===== */
+/* ===== Term exams: subject-wise entry, custom mark sheet, mini report cards ===== */
+const TM = { tab: "enter", cls: "", term: "", c: "", s: "", opt: (() => { try { return JSON.parse(localStorage.tmOpt || "{}"); } catch { return {}; } })() };
+const TCOL = { Teal: "#0b4a4a", Blue: "#1f4e8c", Maroon: "#7a1f2b", Black: "#222222" };
+const tTid = term => "term_" + termKey(term);
+const tOpt = () => Object.assign({ title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, sig: 1, cn: 6, clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
+function tReadOpt() {
+  const o = tOpt(), v = id => $(id) ? $(id).value : null;
+  if (v("to-title") != null) { o.title = v("to-title").trim() || "Mark Sheet"; o.or = v("to-or"); o.col = v("to-col"); }
+  if (v("to-n") != null) o.cn = +v("to-n");
+  document.querySelectorAll("#tchk input, #tcchk input").forEach(i => o[i.value] = i.checked ? 1 : 0);
+  TM.opt = o; try { localStorage.tmOpt = JSON.stringify(o); } catch { } return o;
+}
+V.term = host => {
+  setTitle("Term exams", "Subject-wise marks, mark sheets and mini report cards");
+  if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
+  if (!S.cfg.terms.length) return host.innerHTML = noAccess("The admin has not added exam terms yet (Admin → Settings → Exam terms).");
+  if (!S.cfg.terms.includes(TM.term)) TM.term = S.cfg.terms[0];
+  host.innerHTML = `<div class="seg" id="ttabs"></div><div id="tbody"></div>`; tTab();
+};
+function tTab() {
+  $("ttabs").innerHTML = Object.entries({ enter: "Enter marks", sheet: "Mark sheet", cards: "Mini report cards" }).map(([k, v]) => `<button class="${TM.tab === k ? "on" : ""}" data-a="tGo" data-t="${k}">${v}</button>`).join("");
+  ({ enter: tEnter, sheet: tSheet, cards: tCards })[TM.tab]($("tbody"));
+}
+A.tGo = b => { TM.tab = b.dataset.t; tTab(); };
+const termSel = () => `<select id="tterm" data-c="tTermCh" aria-label="Term">${S.cfg.terms.map(t => `<option ${t === TM.term ? "selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+A.tTermCh = b => { TM.term = b.value; tTab(); };
+A.tClsCh = b => { TM.cls = b.value; tTab(); };
+A.tOptCh = () => { if ($("tprev")) tPrev(); };
+
+/* ----- entry: my class and other classes, one subject at a time ----- */
+function tEnter(host) {
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("t")}${termSel()}</div><div class="row"><input id="tmax" type="number" inputmode="decimal" placeholder="Max marks (e.g. 80)" aria-label="Max marks"><input id="tdt" type="date" value="${today()}" aria-label="Exam date"></div><p class="sub" id="tinfo"></p><button class="btn" data-a="tStart">Start entry</button><p class="sub">To correct the exam's date or max marks, or delete it, use Test marks → Test history.</p></div><div id="mentry"></div>`;
+  if (myClasses().includes(TM.c)) $("tc").value = TM.c;
+  fillPair("t"); if (subjectsOf($("tc").value).includes(TM.s)) $("ts").value = TM.s;
+  A.pairDone_t = tInfo; tInfo();
+}
+async function tInfo() {
+  const c = $("tc") && $("tc").value, s = $("ts") && $("ts").value; if (!c || !s) return; TM.c = c; TM.s = s;
+  const path = P.marks(c, s); await load([path], true);
+  if (!$("tinfo") || $("tc").value !== c || $("ts").value !== s) return;
+  const tid = tTid(TM.term), t = getAt(D[path], ["tests", tid]);
+  if (t) { $("tmax").value = t.max; $("tdt").value = t.date; }
+  $("tinfo").textContent = t ? `${TM.term}: ${Object.keys(getAt(D[path], ["marks", tid]) || {}).length}/${classStudents(c).length} entered · out of ${t.max}.` : `No ${TM.term} marks entered yet for ${c} ${s}.`;
+}
+A.tStart = b => busy(b, async () => {
+  const c = $("tc").value, s = $("ts").value, max = +$("tmax").value, date = $("tdt").value;
+  if (!c || !s || !(max > 0) || !date) return toast("Choose class and subject, then enter the max marks.", true);
+  const path = P.marks(c, s), tid = tTid(TM.term); await load([path], true);
+  const t = getAt(D[path], ["tests", tid]);
+  if (!t || t.max !== max || t.date !== date) {
+    if (t && t.max !== max && Object.keys(getAt(D[path], ["marks", tid]) || {}).length && !confirm("Marks are already entered out of " + t.max + ". Change this exam to " + max + "?")) return;
+    try { await patch(path, [{ k: "tests." + tid, v: { name: TM.term + " Exam", date, max, term: TM.term, by: (t && t.by) || S.me.name } }]); } catch (x) { return toast(x.message, true); }
+  }
+  await mRun($("mentry"), c, s, tid); tInfo();
+});
+
+/* ----- shared data: one row per student, one column per subject ----- */
+function tData(cls, term) {
+  const tid = tTid(term), pass = S.cfg.passPercent;
+  const cols = subjectsOf(cls).map(sub => { const f = D[P.marks(cls, sub)] || {}; return { sub, t: getAt(f, ["tests", tid]), ms: getAt(f, ["marks", tid]) || {} }; }).filter(c => c.t);
+  const rows = classStudents(cls).map(s => {
+    let tot = 0, mx = 0, fail = 0, ab = 0, n = 0;
+    const cells = cols.map(c => { const e = c.ms[s.id]; if (!e) return null; n++; if (e.ab) { ab++; return e; } tot += e.m; mx += e.max; if (e.m / e.max * 100 < pass) fail++; return e; });
+    return { s, cells, tot, mx, n, pct: mx ? tot / mx * 100 : null, res: !n ? "—" : fail ? "Fail" : ab ? "Absent" : n < cols.length ? "Incomplete" : "Pass" };
+  });
+  const rk = rows.filter(r => r.pct != null).sort((a, b) => b.pct - a.pct); rk.forEach((r, i) => r.rank = i && r.pct === rk[i - 1].pct ? rk[i - 1].rank : i + 1);
+  return { cols, rows };
+}
+const fmt1 = n => n == null ? "" : (Math.round(n * 10) / 10).toString();
+
+/* ----- mark sheet ----- */
+async function tSheet(host) {
+  const cs = myClasses(); if (!cs.includes(TM.cls)) TM.cls = cs[0]; const o = tOpt();
+  host.innerHTML = `<div class="card"><div class="row"><select id="tcl" data-c="tClsCh" aria-label="Class">${cs.map(c => `<option ${c === TM.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${termSel()}</div><p class="sub">Columns are the subjects you can access in this class.</p>
+   <h4>Design</h4><div class="form"><label>Title<input id="to-title" data-c="tOptCh" value="${esc(o.title)}" placeholder="Mark Sheet"></label><div class="row"><select id="to-or" data-c="tOptCh" aria-label="Page"><option value="landscape" ${o.or === "landscape" ? "selected" : ""}>Landscape A4</option><option value="portrait" ${o.or === "portrait" ? "selected" : ""}>Portrait A4</option></select><select id="to-col" data-c="tOptCh" aria-label="Colour">${Object.keys(TCOL).map(k => `<option ${o.col === k ? "selected" : ""}>${k}</option>`).join("")}</select></div></div>
+   <div class="xsets" id="tchk">${[["logo", "School logo"], ["roll", "Serial no."], ["max", "Max marks under subject names"], ["tot", "Total"], ["pct", "Percentage"], ["rank", "Rank"], ["res", "Result"], ["sig", "Signature lines"]].map(([k, v]) => `<label class="cb"><input type="checkbox" data-c="tOptCh" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
+   <button class="btn" data-a="tPrint">${ic("print", 18)} Print / save PDF</button><div class="err" id="terr"></div></div><div id="tprev"></div>`;
+  const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { return $("terr").textContent = e.message; }
+  if (!stale(t) && $("tprev")) tPrev();
+}
+function tPrev() { const h = tSheetHTML(TM.cls, TM.term, tReadOpt()); $("tprev").innerHTML = h ? `<div class="card"><div class="scroll">${h}</div></div>` : `<div class="card empty"><b>No ${esc(TM.term)} marks yet</b><p class="sub">Enter the term marks first (Enter marks tab).</p></div>`; }
+function tSheetHTML(cls, term, o) {
+  const d = tData(cls, term); if (!d.cols.length) return "";
+  const col = TCOL[o.col] || TCOL.Teal, avgOf = i => avg(d.rows.map(r => r.cells[i]).filter(e => e && !e.ab).map(e => e.m));
+  return `<div class="msx" style="--ac:${col}"><div class="msh">${o.logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><div>${esc(o.title)} · ${esc(term)} · Class ${esc(cls)}</div></div></div>
+   <table class="pt mst"><tr>${o.roll ? "<th>#</th>" : ""}<th>Student</th>${d.cols.map(c => `<th>${esc(c.sub)}${o.max ? `<br><small>/${c.t.max}</small>` : ""}</th>`).join("")}${o.tot ? "<th>Total</th>" : ""}${o.pct ? "<th>%</th>" : ""}${o.rank ? "<th>Rank</th>" : ""}${o.res ? "<th>Result</th>" : ""}</tr>
+   ${d.rows.map((r, i) => `<tr>${o.roll ? `<td>${i + 1}</td>` : ""}<td>${esc(r.s.name)}</td>${r.cells.map(e => `<td>${!e ? "" : e.ab ? "Ab" : e.m}</td>`).join("")}${o.tot ? `<td>${r.n ? r.tot + "/" + r.mx : ""}</td>` : ""}${o.pct ? `<td>${fmt1(r.pct)}</td>` : ""}${o.rank ? `<td>${r.rank || ""}</td>` : ""}${o.res ? `<td class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</td>` : ""}</tr>`).join("")}
+   <tr class="avr"><td${o.roll ? ' colspan="2"' : ""}><b>Class average</b></td>${d.cols.map((c, i) => `<td>${fmt1(avgOf(i))}</td>`).join("")}${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0) ? `<td colspan="${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0)}"></td>` : ""}</tr></table>
+   ${o.sig ? `<div class="sig"><span>${S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}Class teacher</span><span>Examination in-charge</span><span>Principal</span></div>` : ""}</div>`;
+}
+A.tPrint = () => { const o = tReadOpt(), h = tSheetHTML(TM.cls, TM.term, o); if (!h) return $("terr").textContent = "No marks to print for this term yet."; printHTML(h, `@page{size:A4 ${o.or};margin:10mm}`); };
+
+/* ----- mini report cards (4 / 6 / 8 per A4 page) ----- */
+async function tCards(host) {
+  const cs = inchargeClasses(); if (!cs.length) return host.innerHTML = noAccess("Mini report cards need every subject's marks, so they are available to the class incharge.");
+  if (!cs.includes(TM.cls)) TM.cls = cs[0]; const o = tOpt();
+  host.innerHTML = `<div class="card"><div class="row"><select id="tcl" data-c="tClsCh" aria-label="Class">${cs.map(c => `<option ${c === TM.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${termSel()}<select id="to-n" aria-label="Cards per page">${[4, 6, 8].map(n => `<option value="${n}" ${o.cn === n ? "selected" : ""}>${n} per A4 page</option>`).join("")}</select></div>
+   <div class="xsets" id="tcchk">${[["clogo", "School logo"], ["crank", "Rank"], ["cres", "Result (pass / fail)"], ["cremark", "Blank remarks line"], ["csig", "My signature (class teacher)"], ["cpar", "Parent signature line"]].map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
+   <button class="btn" data-a="tCardsGo">${ic("print", 18)} Print cards</button><div class="err" id="terr"></div></div>`;
+  const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { $("terr").textContent = e.message; }
+}
+function miniCard(cls, term, r, d, o, col) {
+  return `<div class="mc" style="--ac:${col}"><div class="mch">${o.clogo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><small>Report card · ${esc(term)}</small></div></div>
+   <div class="mcn"><b>${esc(r.s.name)}</b><span>Class ${esc(cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</span></div>
+   <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.m}</td><td>${c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
+   <div class="mcr">${o.crank && r.rank ? `Rank ${r.rank} ` : ""}${o.cres ? `<b class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</b>` : ""}</div>${o.cremark ? `<div class="mcl">Remarks:</div>` : ""}
+   <div class="sig2"><span>${o.csig && S.sig ? `<img src="${S.sig}" alt="">` : ""}Class teacher</span>${o.cpar ? `<span>Parent</span>` : ""}</div></div>`;
+}
+A.tCardsGo = () => {
+  const o = tReadOpt(), d = tData(TM.cls, TM.term); if (!d.cols.length) return $("terr").textContent = "No " + TM.term + " marks entered for this class yet.";
+  const col = TCOL[o.col] || TCOL.Teal, n = [4, 6, 8].includes(o.cn) ? o.cn : 6;
+  printHTML(chunk(d.rows, n).map(g => `<div class="mpg n${n}">${g.map(r => miniCard(TM.cls, TM.term, r, d, o, col)).join("")}</div>`).join(""), "@page{size:A4 portrait;margin:8mm}");
+};
+
+/* ===== extras.js ===== */
+/* ----- school logo + teacher signature (stored on the server, cached on the device) ----- */
+async function loadAssets() {
+  S.logo = localStorage.logo || ""; S.sig = localStorage["sig_" + S.me.username] || "";
+  try { S.logo = (await api("GET", "/logo")).img || ""; localStorage.logo = S.logo; } catch { }
+  try { S.sig = (await api("GET", "/sig")).img || ""; localStorage["sig_" + S.me.username] = S.sig; } catch { }
+}
+function imgPick(max, cb) {
+  const i = document.createElement("input"); i.type = "file"; i.accept = "image/*";
+  i.onchange = () => {
+    const f = i.files[0]; if (!f) return; const r = new FileReader();
+    r.onload = () => { const im = new Image(); im.onerror = () => toast("That file is not a usable image.", true);
+      im.onload = () => {
+        let k = Math.min(1, max / Math.max(im.width, im.height)), out = "";
+        const enc = (s, type) => { const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(im.width * s)); c.height = Math.max(1, Math.round(im.height * s)); const g = c.getContext("2d"); if (type === "image/jpeg") { g.fillStyle = "#fff"; g.fillRect(0, 0, c.width, c.height); } g.drawImage(im, 0, 0, c.width, c.height); return c.toDataURL(type, .75); };
+        for (let n = 0; n < 4; n++) { out = enc(k, "image/png"); if (out.length < 90000) break; k *= .7; }
+        if (out.length >= 90000) out = enc(k, "image/jpeg");
+        cb(out);
+      }; im.src = r.result; };
+    r.readAsDataURL(f);
+  };
+  i.click();
+}
+const sigSend = async img => { try { await api("POST", "/sig", { img }); S.sig = img; localStorage["sig_" + S.me.username] = img; toast(img ? "Signature saved" : "Signature removed"); A.profile(); } catch (x) { toast(x.message, true); } };
+A.sigUp = () => imgPick(400, sigSend);
+A.sigDel = () => sigSend("");
+let SG = { drew: false, last: null };
+A.sigDraw = () => {
+  sheetL(`<h2>Draw your signature</h2><p class="sub">Sign inside the box with your finger or pen.</p><canvas id="sgc" class="sgc" width="640" height="240"></canvas><p></p><div class="row"><button class="btn" data-a="sigSave" style="flex:2">Save</button><button class="btn alt" data-a="sigClr">Clear</button><button class="btn alt" data-a="profile">Back</button></div>`);
+  const c = $("sgc"), g = c.getContext("2d"); SG = { drew: false, last: null }; g.lineWidth = 4; g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = "#0b1f3a";
+  const pt = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; };
+  c.onpointerdown = e => { c.setPointerCapture(e.pointerId); SG.last = pt(e); g.beginPath(); g.moveTo(...SG.last); g.lineTo(SG.last[0] + .1, SG.last[1]); g.stroke(); SG.drew = true; };
+  c.onpointermove = e => { if (!SG.last) return; const p = pt(e); g.beginPath(); g.moveTo(...SG.last); g.lineTo(...p); g.stroke(); SG.last = p; };
+  c.onpointerup = c.onpointercancel = () => SG.last = null;
+};
+A.sigClr = () => { const c = $("sgc"); c.getContext("2d").clearRect(0, 0, c.width, c.height); SG.drew = false; };
+A.sigSave = () => { if (!SG.drew) return toast("Draw your signature first.", true); sigSend($("sgc").toDataURL("image/png")); };
+const logoSend = async img => { try { await api("POST", "/admin/logo", { img }); S.logo = img; localStorage.logo = img; toast(img ? "Logo saved" : "Logo removed"); adSettings($("adb")); } catch (x) { toast(x.message, true); } };
+A.logoUp = () => imgPick(300, logoSend);
+A.logoDel = () => logoSend("");
+
+/* ----- notebooks: remove one entry, move or delete a whole day ----- */
+A.nsDel = b => busy(b, async () => {
+  if (!confirm("Delete this notebook entry?")) return;
+  try { await patch(N.ep, [{ k: `entries.${N.date}.${NS.id}`, v: null }]); } catch (x) { return $("e2").textContent = x.message; }
+  entryDraw("n"); closeSheet(true); toast("Entry deleted");
+});
+A.nDay = () => {
+  const n = Object.keys(((D[N.ep] || {}).entries || {})[N.date] || {}).length; if (!n) return toast("No entries on " + fmtD(N.date) + ".", true);
+  sheetL(`<h2>Entries of ${esc(fmtD(N.date))}</h2><p class="sub">${n} notebook ${n === 1 ? "entry" : "entries"} · ${esc(N.cls)} ${esc(N.sub)}</p><div class="form"><label>Move all of them to date<input id="ndn" type="date" value="${esc(N.date)}"></label></div><p></p><div class="row"><button class="btn" data-a="nMove" style="flex:2">Move</button><button class="btn alt" data-a="nDelDay">Delete all</button></div><p></p><button class="btn alt" data-a="close">Close</button>`);
+};
+A.nMove = b => busy(b, async () => {
+  const to = $("ndn").value, from = N.date, en = D[N.ep].entries || {}, src = en[from] || {}; if (!to || to === from) return toast("Choose a different date.", true);
+  const clash = Object.keys(src).filter(id => (en[to] || {})[id]).length; if (clash && !confirm(clash + " students already have an entry on that date. Replace them?")) return;
+  const ops = Object.entries(src).flatMap(([id, v]) => [{ k: `entries.${to}.${id}`, v }, { k: `entries.${from}.${id}`, v: null }]);
+  try { for (const part of chunk(ops, 100)) await patch(N.ep, part); await patch(N.ep, [{ k: `entries.${from}`, v: null }]); } catch (x) { return toast(x.message, true); }
+  closeSheet(true); toast("Entries moved to " + fmtD(to)); $("ndate").value = to; N.date = to; nbDraw();
+});
+A.nDelDay = b => busy(b, async () => {
+  const src = (D[N.ep].entries || {})[N.date] || {}, ids = Object.keys(src); if (!confirm(`Delete all ${ids.length} notebook entries of ${fmtD(N.date)}?`)) return;
+  try { for (const part of chunk([...ids.map(id => ({ k: `entries.${N.date}.${id}`, v: null })), { k: `entries.${N.date}`, v: null }], 150)) await patch(N.ep, part); } catch (x) { return toast(x.message, true); }
+  closeSheet(true); toast("Entries deleted"); nbDraw();
+});
+
 /* ===== classwork.js ===== */
 /* ===== Class incharge area: monitors, fines & dues, parent calls, fees ===== */
 const C = { cls: "", tab: "mon", term: "" };
@@ -413,12 +665,12 @@ V.cls = async host => {
   $("cbody").innerHTML = SK; const t = VT;
   await bundleFast(C.cls, () => { if (!stale(t) && $("cbody")) cTab(); });
 };
-A.cClass = b => { C.cls = b.value; $("cbody").innerHTML = SK; const t = VT; bundleFast(C.cls, () => { if (!stale(t)) cTab(); }); };
+A.cClass = b => { C.cls = b.value; LG = {}; $("cbody").innerHTML = SK; const t = VT; bundleFast(C.cls, () => { if (!stale(t)) cTab(); }); };
 A.cGo = b => { C.tab = b.dataset.t; cTab(); };
 function cTab() {
-  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees" };
+  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees", att: "Attendance" };
   $("ctabs").innerHTML = Object.entries(T).map(([k, v]) => `<button class="${C.tab === k ? "on" : ""}" data-a="cGo" data-t="${k}">${v}</button>`).join("");
-  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee })[C.tab]($("cbody"));
+  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee, att: cAtt })[C.tab]($("cbody"));
 }
 
 /* ----- weekly monitors: automatic round-robin, incharge can override ----- */
@@ -442,8 +694,8 @@ A.monSet = async b => {
 /* ----- fines & dues ----- */
 function cFine(host) {
   const rows = fineRows(C.cls), due = rows.filter(f => !f.paid).reduce((n, f) => n + f.amt, 0), got = rows.filter(f => f.paid).reduce((n, f) => n + f.amt, 0), def = classStudents(C.cls).filter(s => fineDue(C.cls, s.id) > 0).length;
-  host.innerHTML = `<div class="kpis"><div class="kpi"><small>Pending</small><b>${rupee(due)}</b></div><div class="kpi"><small>Collected</small><b>${rupee(got)}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Students with dues</small><b>${def}</b></div></div><div id="fent"></div>`;
-  entry($("fent"), { id: "f", cls: C.cls, counter: false, done: () => false, note: "Tap a student to log a fine or an I-card / other due. Red badges show what is still pending.", tail: s => { const d = fineDue(C.cls, s.id); return d ? `<span class="pill bad">${rupee(d)} due</span>` : ""; }, pick: fOpen });
+  host.innerHTML = `<div class="kpis"><div class="kpi"><small>Pending</small><b>${rupee(due)}</b></div><div class="kpi"><small>Collected</small><b>${rupee(got)}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Students with dues</small><b>${def}</b></div></div><div id="fent"></div><div id="flog"></div>`;
+  entry($("fent"), { id: "f", cls: C.cls, counter: false, done: () => false, note: "Tap a student to log a fine or an I-card / other due. Red badges show what is still pending.", tail: s => { const d = fineDue(C.cls, s.id); return d ? `<span class="pill bad">${rupee(d)} due</span>` : ""; }, pick: fOpen }); logDraw("fines");
 }
 function fOpen(id) {
   const s = stuById(id), rows = fineRows(C.cls, id).sort((a, b) => b.date.localeCompare(a.date));
@@ -469,14 +721,17 @@ A.fPay = async b => {
 /* ----- parent calls ----- */
 function cCall(host) {
   const st = stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id)), all = classStudents(C.cls), cov = all.filter(s => calledThisWeek(C.cls, s.id)).length;
-  host.innerHTML = `<div class="card"><b>Calls to make</b><p class="sub">Students with 2+ notebook chapters pending or low / falling marks, not called this week.</p><div class="row chips">${st.length ? st.map(r => `<button class="chip bad" data-a="cPick" data-id="${esc(r.s.id)}">${esc(r.s.name)} <small>${esc(r.risk[0])}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`}</div><p class="sub">Coverage this week: ${cov}/${all.length} parents called.</p></div><div id="cent"></div>`;
+  host.innerHTML = `<div class="card"><b>Calls to make</b><p class="sub">Students with 2+ notebook chapters pending or low / falling marks, not called this week.</p><div class="row chips">${st.length ? st.map(r => `<button class="chip bad" data-a="cPick" data-id="${esc(r.s.id)}">${esc(r.s.name)} <small>${esc(r.risk[0])}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`}</div><p class="sub">Coverage this week: ${cov}/${all.length} parents called.</p></div>
+   <div class="card"><div class="row mid"><label class="fl">Date for the calls you enter<input id="cdd" type="date" value="${C.callDate || today()}" data-c="cDate"></label><p class="sub" style="flex:2;margin:0;min-width:180px">Set it once: every call you log below uses this date.</p></div></div><div id="cent"></div><div id="clog"></div>`;
   entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${fmtD(c.date)} · ${esc(c.resp)}` : ""; }, pick: callOpen });
+  logDraw("calls");
 }
+A.cDate = b => { C.callDate = b.value || today(); };
 A.cPick = b => callOpen(b.dataset.id);
 function callOpen(id) {
   const s = stuById(id), h = callsOf(C.cls, id).slice(0, 3), r = stats(C.cls).rows.find(x => x.s.id === id);
   sheet(`<h2>${esc(s.name)}</h2>${r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : ""}${h.length ? `<div class="hist">${h.map(c => `<div class="hr"><span>${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("")}</div>` : ""}
-   <div class="row"><input id="cd" type="date" value="${today()}" aria-label="Call date"><select id="cr" aria-label="Parent's response">${RESP.map(x => `<option>${x}</option>`).join("")}</select></div><p><input id="cn" placeholder="Remark (optional)" style="width:100%"></p>
+   <div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cr" aria-label="Parent's response">${RESP.map(x => `<option>${x}</option>`).join("")}</select></div><p><input id="cn" placeholder="Remark (optional)" style="width:100%"></p>
    <div class="row"><button class="btn" data-a="cSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="cSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
 }
 A.cSkip = b => { if (!closeSheet()) return; const n = entryNext("c", b.dataset.id); if (n) callOpen(n.id); };
@@ -486,31 +741,149 @@ A.cSave = b => busy(b, async () => {
   dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true); toast("Call logged");
 });
 
-/* ----- fee clearance ----- */
+/* ----- log manager (calls + fines): edit, change dates and delete one or many ----- */
+let LG = {};
+const lgItems = k => k === "calls" ? callsOf(C.cls) : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date));
+function logDraw(k) {
+  const host = $(k === "calls" ? "clog" : "flog"); if (!host) return; const L = LG[k] = LG[k] || { sel: new Set(), n: 15, q: "" };
+  host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? "Call log" : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>
+   <div class="row tools"><button class="btn alt sm" data-a="lgAll" data-k="${k}">Select / clear all</button><button class="btn alt sm" data-a="lgDate" data-k="${k}">Change date</button>${k === "fines" ? `<button class="btn alt sm" data-a="lgPaid" data-k="fines">Mark paid</button>` : ""}<button class="btn alt sm" data-a="lgDel" data-k="${k}">Delete</button></div><small class="sub" id="lc-${k}"></small><div id="ll-${k}"></div></div>`;
+  $("lq-" + k).oninput = e => { L.q = e.target.value.toLowerCase(); L.n = 15; logList(k); };
+  logList(k);
+}
+function logList(k) {
+  const L = LG[k], all = lgItems(k), ids = new Set(all.map(x => x.id)); L.sel.forEach(i => { if (!ids.has(i)) L.sel.delete(i); });
+  const it = all.filter(x => { const s = stuById(x.sid); return !L.q || (s && s.name.toLowerCase().includes(L.q)); }), part = it.slice(0, L.n);
+  $("ll-" + k).innerHTML = part.map(x => { const s = stuById(x.sid); return `<div class="lrow"><label class="cb"><input type="checkbox" data-c="lgChk" data-k="${k}" data-id="${esc(x.id)}" ${L.sel.has(x.id) ? "checked" : ""} aria-label="Select"></label><div class="lm"><b>${esc(s ? s.name : "?")}</b><small>${fmtD(x.date)} · ${k === "calls" ? esc(x.resp) : esc(FTYPE[x.type] || x.type) + " · " + rupee(x.amt) + (x.paid ? " · paid" : " · due")}${x.r ? " · " + esc(x.r) : ""}</small></div><button class="link" data-a="lgEdit" data-k="${k}" data-id="${esc(x.id)}">Edit</button></div>`; }).join("") + (it.length > L.n ? `<p><button class="btn alt sm" data-a="lgMore" data-k="${k}">Show more (${it.length - L.n})</button></p>` : "") || `<p class="sub">Nothing logged yet.</p>`;
+  lgCount(k);
+}
+const lgCount = k => { const e = $("lc-" + k); if (e) e.textContent = LG[k].sel.size ? LG[k].sel.size + " selected" : "Tick entries to change their date or delete them together."; };
+A.lgChk = b => { const L = LG[b.dataset.k]; b.checked ? L.sel.add(b.dataset.id) : L.sel.delete(b.dataset.id); lgCount(b.dataset.k); };
+A.lgMore = b => { LG[b.dataset.k].n += 20; logList(b.dataset.k); };
+A.lgAll = b => { const k = b.dataset.k, L = LG[k], vis = [...document.querySelectorAll(`#ll-${k} input[type=checkbox]`)], on = vis.some(c => !c.checked); vis.forEach(c => { c.checked = on; on ? L.sel.add(c.dataset.id) : L.sel.delete(c.dataset.id); }); lgCount(k); };
+const lgSel = k => { const ids = [...LG[k].sel]; if (!ids.length) toast("Tick at least one entry first.", true); return ids; };
+const lgRun = async (k, ops, msg) => { try { for (const part of chunk(ops, 150)) await patch(P.k(k, C.cls), part); } catch (x) { return toast(x.message, true); } toast(msg); cTab(); };
+A.lgDel = b => { const k = b.dataset.k, ids = lgSel(k); if (!ids.length || !confirm(`Delete ${ids.length} selected ${ids.length === 1 ? "entry" : "entries"}?`)) return; ids.forEach(i => LG[k].sel.delete(i)); lgRun(k, ids.map(i => ({ k: "items." + i, v: null })), ids.length + " deleted"); };
+A.lgPaid = b => { const ids = lgSel("fines"); if (!ids.length) return; lgRun("fines", ids.flatMap(i => [{ k: `items.${i}.paid`, v: 1 }, { k: `items.${i}.pd`, v: today() }]), "Marked paid"); };
+A.lgDate = b => { const k = b.dataset.k, ids = lgSel(k); if (!ids.length) return; LG.cur = { k, ids }; sheetL(`<h2>Change date</h2><p class="sub">${ids.length} selected ${ids.length === 1 ? "entry" : "entries"} will move to this date.</p><input id="lgd" type="date" value="${today()}" style="width:100%"><p></p><div class="row"><button class="btn" data-a="lgDateGo" style="flex:2">Apply</button><button class="btn alt" data-a="close">Cancel</button></div>`); };
+A.lgDateGo = b => busy(b, async () => { const d = $("lgd").value; if (!d) return toast("Pick a date.", true); const { k, ids } = LG.cur; closeSheet(true); await lgRun(k, ids.map(i => ({ k: `items.${i}.date`, v: d })), "Date changed"); });
+A.lgEdit = b => {
+  const k = b.dataset.k, x = lgItems(k).find(i => i.id === b.dataset.id); if (!x) return; LG.cur = { k, id: x.id, x };
+  sheet(`<h2>${esc((stuById(x.sid) || { name: "" }).name)}</h2>` + (k === "calls"
+    ? `<div class="row"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"><select id="er" aria-label="Response">${RESP.map(r => `<option ${r === x.resp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div><p><input id="en" placeholder="Remark" value="${esc(x.r || "")}" style="width:100%"></p>`
+    : `<div class="row"><select id="et" aria-label="Type">${Object.entries(FTYPE).map(([a, v]) => `<option value="${a}" ${a === x.type ? "selected" : ""}>${v}</option>`).join("")}</select><input id="ea" type="number" inputmode="decimal" value="${x.amt}" aria-label="Amount"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"></div><p><input id="en" placeholder="Remark" value="${esc(x.r || "")}" style="width:100%"></p><label class="cb"><input type="checkbox" id="ep" ${x.paid ? "checked" : ""}> Paid</label>`)
+    + `<p></p><div class="row"><button class="btn" data-a="lgSave" style="flex:2">Save</button><button class="btn alt" data-a="lgDelOne">Delete</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+};
+A.lgSave = b => busy(b, async () => {
+  const { k, x } = LG.cur, { id, ...rest } = x; let v;
+  if (!$("ed").value) return $("e2").textContent = "Pick a date.";
+  if (k === "calls") v = Object.assign(rest, { date: $("ed").value, resp: $("er").value, r: $("en").value.trim(), t: Date.now() });
+  else { const amt = +$("ea").value; if (!(amt > 0)) return $("e2").textContent = "Enter an amount."; const paid = $("ep").checked ? 1 : 0; v = Object.assign(rest, { type: $("et").value, amt, date: $("ed").value, r: $("en").value.trim(), paid, t: Date.now() }); if (paid) v.pd = rest.pd || today(); else delete v.pd; }
+  try { await patch(P.k(k, C.cls), [{ k: "items." + id, v }]); } catch (e) { return $("e2").textContent = e.message; }
+  closeSheet(true); toast("Saved"); cTab();
+});
+A.lgDelOne = async () => { const { k, id } = LG.cur; if (!confirm("Delete this entry?")) return; try { await patch(P.k(k, C.cls), [{ k: "items." + id, v: null }]); } catch (e) { return toast(e.message, true); } closeSheet(true); toast("Deleted"); cTab(); };
+
+/* ----- fees, month-wise (academic year April to March) ----- */
+const MN = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
+const ayStart = (d = today()) => { const y = +d.slice(0, 4), m = +d.slice(5, 7); return m >= 4 ? y : y - 1; };
+const fyKey = y => `Y_${y}-${String(y + 1).slice(2)}`, fyLab = y => `${y}-${String(y + 1).slice(2)}`;
+const fyMonths = y => MN.map((n, i) => ({ n, i, k: (i < 9 ? y : y + 1) + "-" + String((i + 3) % 12 + 1).padStart(2, "0") }));
+const fyRec = (cls, y, sid) => getAt(FD("fees", cls), [fyKey(y), sid]);
+const fyElapsed = y => { const t = today(), cur = ayStart(t); if (y < cur) return 12; if (y > cur) return 0; return ((+t.slice(5, 7) + 8) % 12) + 1; };
+const fyM = n => (Number.isInteger(n) ? n : n.toFixed(1)) + (n === 1 ? " month" : " months");
+function fyTxt(ms, y) {
+  const L = fyMonths(y); let i = 0; while (i < 12 && ms[L[i].k] === 2) i++;
+  let t = i ? (i === 12 ? "Full year paid" : "Paid till " + L[i - 1].n) : "";
+  if (i < 12 && ms[L[i].k] === 1) t += (t ? " + " : "") + "half " + L[i].n;
+  const extra = L.filter((m, j) => j > i && ms[m.k]).length; if (extra) t += (t ? " · " : "") + extra + " other month" + (extra > 1 ? "s" : "");
+  return t || "Nothing paid";
+}
+const fyText = (cls, y, sid) => fyTxt((fyRec(cls, y, sid) || {}).months || {}, y);
+function fyCalc(cls, y, sid) {
+  const r = fyRec(cls, y, sid), ms = (r && r.months) || {}, el = fyElapsed(y); let full = 0, half = 0, paidEl = 0;
+  fyMonths(y).forEach((m, i) => { const v = ms[m.k] || 0; if (v === 2) full++; else if (v === 1) half++; if (i < el) paidEl += v === 2 ? 1 : v === 1 ? .5 : 0; });
+  return { r, full, half, owedM: Math.max(0, el - paidEl), bal: r && r.total > 0 ? Math.max(0, r.total - (r.paid || 0)) : null };
+}
+const fyDef = (cls, y, sid) => { const c = fyCalc(cls, y, sid); return !!c.r && c.owedM > 0; };
+function feeSummary(cls, sid) {
+  const y = ayStart(), c = fyCalc(cls, y, sid); if (!c.r) return `<p class="sub">No fee record for ${fyLab(y)}.</p>`;
+  return `<div class="li"><span>${esc(fyText(cls, y, sid))}</span><b>${c.owedM > 0 ? pill(fyM(c.owedM) + " due", "bad") : "Up to date ✓"}</b></div>${c.bal != null ? `<div class="li"><span>Yearly due amount</span><b>${rupee(c.bal)}</b></div>` : ""}`;
+}
 function cFee(host) {
-  if (!S.cfg.terms.length) return host.innerHTML = noAccess("The admin has not added fee terms yet (Admin → Settings).");
-  if (!S.cfg.terms.includes(C.term)) C.term = S.cfg.terms[0];
-  const all = classStudents(C.cls), recs = all.map(s => feeRec(C.cls, C.term, s.id)), due = recs.reduce((n, r) => n + (r ? r.due : 0), 0), paid = recs.reduce((n, r) => n + feePaid(r), 0), def = recs.filter(r => feeLeft(r) > 0).length;
-  host.innerHTML = `<div class="row"><select id="fterm" data-c="fTerm" aria-label="Term" style="max-width:200px">${S.cfg.terms.map(t => `<option ${t === C.term ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
-   <div class="kpis"><div class="kpi"><small>Due</small><b>${rupee(due)}</b></div><div class="kpi"><small>Collected</small><b>${rupee(paid)}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Defaulters</small><b>${def}</b></div></div><div id="fee"></div>`;
-  entry($("fee"), { id: "e", cls: C.cls, done: s => { const r = feeRec(C.cls, C.term, s.id); return !!r && feeLeft(r) === 0 && r.due > 0; }, tail: s => { const r = feeRec(C.cls, C.term, s.id); return !r ? "" : feeLeft(r) ? `<span class="pill bad">${rupee(feeLeft(r))} left</span>` : "Cleared"; }, pick: feeOpen });
+  C.fy = C.fy || ayStart(); const y = C.fy, all = classStudents(C.cls), cs = all.map(s => fyCalc(C.cls, y, s.id));
+  const def = cs.filter(c => c.r && c.owedM > 0).length, paidAmt = cs.reduce((n, c) => n + ((c.r && c.r.paid) || 0), 0), dueAmt = cs.reduce((n, c) => n + (c.bal || 0), 0), recd = cs.filter(c => c.r).length;
+  host.innerHTML = `<div class="row"><select id="fyr" data-c="fYear" aria-label="Academic year" style="max-width:200px">${[ayStart() + 1, ayStart(), ayStart() - 1, ayStart() - 2].map(v => `<option value="${v}" ${v === y ? "selected" : ""}>Year ${fyLab(v)}</option>`).join("")}</select></div>
+   <div class="kpis"><div class="kpi"><small>With a fee record</small><b>${recd}/${all.length}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Behind on months</small><b>${def}</b></div><div class="kpi"><small>Paid (amounts entered)</small><b>${rupee(paidAmt)}</b></div><div class="kpi"><small>Due (amounts entered)</small><b>${rupee(dueAmt)}</b></div></div><div id="fee"></div>`;
+  entry($("fee"), { id: "e", cls: C.cls, note: "Tap a student to mark the months paid (full or half), a quarter, or “paid until” a month. The yearly amount is optional.", done: s => { const c = fyCalc(C.cls, y, s.id); return !!c.r && c.owedM === 0; }, tail: s => { const c = fyCalc(C.cls, y, s.id); return !c.r ? "" : `${esc(fyText(C.cls, y, s.id))}${c.owedM > 0 ? ` <span class="pill bad">${fyM(c.owedM)} due</span>` : ""}`; }, pick: feeOpen });
 }
-A.fTerm = b => { C.term = b.value; cFee($("cbody")); };
+A.fYear = b => { C.fy = +b.value; cFee($("cbody")); };
+let FY = {};
 function feeOpen(id) {
-  const s = stuById(id), r = feeRec(C.cls, C.term, id) || { due: "", pays: [] }, prev = S.cfg.terms.map(t => feeRec(C.cls, t, id)).filter(Boolean).pop();
-  sheet(`<h2>${esc(s.name)}</h2><p class="sub">${esc(C.term)} · paid ${rupee(feePaid(r))}${r.due ? " of " + rupee(r.due) : ""}</p>
-   ${r.pays.length ? `<div class="hist">${r.pays.map(p => `<div class="hr"><span>${fmtD(p.d)}</span><b>${rupee(p.a)}</b></div>`).join("")}</div>` : ""}
-   <div class="row"><input id="fdue" type="number" inputmode="decimal" placeholder="Amount due ₹" value="${r.due || (prev ? prev.due : "")}" aria-label="Amount due"><input id="fpay" type="number" inputmode="decimal" placeholder="Payment received ₹" aria-label="Payment received" autofocus><input id="fpd" type="date" value="${today()}" aria-label="Payment date"></div>
-   <div class="row" style="margin-top:12px"><button class="btn" data-a="feeSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="feeFull" data-id="${esc(id)}">Paid in full</button></div><div class="err" id="e2"></div>`);
+  const y = C.fy, r = fyRec(C.cls, y, id) || {}; FY = { sid: id, y, ms: Object.assign({}, r.months) };
+  sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">Fees ${fyLab(y)} · <span id="fytxt"></span></p><div id="fygrid" class="mgrid"></div>
+   <div class="row chips">${[0, 1, 2, 3].map(q => `<button class="chip" data-a="fyQ" data-q="${q}">Quarter ${q + 1} <small>${MN[q * 3]}–${MN[q * 3 + 2]}</small></button>`).join("")}</div>
+   <div class="row mid"><label class="fl">Paid until<select id="fyu"><option value="">Choose month</option>${MN.map((n, i) => `<option value="${i}">${n}</option>`).join("")}</select></label><label class="cb"><input type="checkbox" id="fyh"> only half of that month</label><button class="btn alt sm" data-a="fyUpto">Apply</button></div>
+   <h4>Amounts (optional)</h4><div class="row"><input id="fyt" type="number" inputmode="decimal" placeholder="Total fee for the year ₹" value="${r.total || ""}" aria-label="Total fee for the year"><input id="fyp" type="number" inputmode="decimal" placeholder="Paid so far ₹" value="${r.paid ?? ""}" aria-label="Paid so far"></div>
+   <p class="sub" id="fydue"></p><button class="btn alt sm" data-a="fyAmt">Mark months from the paid amount</button>
+   <p></p><div class="row"><button class="btn" data-a="fySave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="fyClear">Clear</button></div><div class="err" id="e2"></div>`);
+  fyGrid(); $("fyt").oninput = $("fyp").oninput = fyDue; fyDue();
 }
-A.feeFull = b => { const due = +$("fdue").value, r = feeRec(C.cls, C.term, b.dataset.id); if (!(due > 0)) return $("e2").textContent = "Enter the amount due first."; $("fpay").value = Math.max(0, due - feePaid(r)); };
-A.feeSave = b => busy(b, async () => {
-  const sid = b.dataset.id, due = +$("fdue").value, pay = +$("fpay").value, r = feeRec(C.cls, C.term, sid) || { pays: [] };
-  if (!(due > 0)) return $("e2").textContent = "Enter the amount due.";
-  const pays = r.pays.slice(); if (pay > 0) pays.push({ d: $("fpd").value, a: pay });
-  try { await patch(P.k("fees", C.cls), [{ k: `${termKey(C.term)}.${sid}`, v: { due, pays, by: S.me.name, t: Date.now() } }]); } catch (x) { return $("e2").textContent = x.message; }
+function fyGrid() {
+  $("fygrid").innerHTML = fyMonths(FY.y).map(m => { const v = FY.ms[m.k] || 0; return `<button class="mb m${v}" data-a="fyM" data-k="${m.k}"><small>${m.k.slice(0, 4)}</small><br>${m.n}<br>${["–", "½", "✔"][v]}</button>`; }).join("");
+  $("fytxt").textContent = fyTxt(FY.ms, FY.y);
+}
+function fyDue() {
+  const t = +$("fyt").value, p = +$("fyp").value || 0;
+  $("fydue").innerHTML = t > 0 ? `Due <b>${rupee(Math.max(0, t - p))}</b> of ${rupee(t)} · one month = ${rupee(t / 12)}` : "Enter the yearly total to see the due amount and to mark months from an amount.";
+}
+A.fyM = b => { const k = b.dataset.k, v = FY.ms[k] || 0, n = v === 0 ? 2 : v === 2 ? 1 : 0; n ? FY.ms[k] = n : delete FY.ms[k]; dirty = true; fyGrid(); };
+A.fyQ = b => { const q = +b.dataset.q, ks = fyMonths(FY.y).slice(q * 3, q * 3 + 3).map(m => m.k), all = ks.every(k => FY.ms[k] === 2); ks.forEach(k => all ? delete FY.ms[k] : FY.ms[k] = 2); dirty = true; fyGrid(); };
+function fySeq(n) { FY.ms = {}; fyMonths(FY.y).forEach((m, i) => { if (i + 1 <= n) FY.ms[m.k] = 2; else if (i < n) FY.ms[m.k] = 1; }); dirty = true; fyGrid(); }
+A.fyUpto = () => { const j = $("fyu").value; if (j === "") return toast("Choose the month first.", true); fySeq(+j + ($("fyh").checked ? .5 : 1)); };
+A.fyAmt = () => { const t = +$("fyt").value, p = +$("fyp").value; if (!(t > 0) || !(p >= 0)) return toast("Enter the yearly total and the amount paid.", true); fySeq(Math.min(12, Math.round(p / (t / 12) * 2) / 2)); };
+A.fySave = b => busy(b, async () => {
+  const total = +$("fyt").value || 0, pRaw = $("fyp").value, paid = pRaw === "" ? null : +pRaw, sid = FY.sid;
+  if (paid != null && (paid < 0 || (total && paid > total))) return $("e2").textContent = "Paid amount cannot be more than the total.";
+  const has = Object.keys(FY.ms).length || total || paid != null;
+  const v = has ? Object.assign({ months: FY.ms, by: S.me.name, t: Date.now() }, total ? { total } : {}, paid != null ? { paid } : {}) : null;
+  try { await patch(P.k("fees", C.cls), [{ k: `${fyKey(FY.y)}.${sid}`, v }]); } catch (x) { return $("e2").textContent = x.message; }
   dirty = false; cFee($("cbody")); const n = entryNext("e", sid); n ? feeOpen(n.id) : closeSheet(true); toast("Saved");
 });
+A.fyClear = async () => {
+  if (!confirm("Remove this student's fee record for the year?")) return;
+  try { await patch(P.k("fees", C.cls), [{ k: `${fyKey(FY.y)}.${FY.sid}`, v: null }]); } catch (x) { return toast(x.message, true); }
+  closeSheet(true); cFee($("cbody")); toast("Cleared");
+};
+
+/* ----- attendance: monthly totals of absent days and leaves ----- */
+const attOf = (cls, m, sid) => getAt(FD("attendance", cls), [m, sid]);
+const monthLabel = m => new Date(m + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+function cAtt(host) {
+  C.am = C.am || today().slice(0, 7); const wd = getAt(FD("attendance", C.cls), [C.am, "_wd"]);
+  host.innerHTML = `<div class="card"><div class="row"><label class="fl">Month<input id="am" type="month" value="${C.am}" data-c="aMonth"></label><label class="fl">Working days this month (optional)<input id="awd" type="number" inputmode="numeric" value="${wd ?? ""}" data-c="aWd"></label></div></div><div id="aent"></div>`;
+  entry($("aent"), { id: "a", cls: C.cls, note: `Total days absent and leaves taken in <b>${esc(monthLabel(C.am))}</b>. Tap a student.`, done: s => !!attOf(C.cls, C.am, s.id), tail: s => { const a = attOf(C.cls, C.am, s.id); return a ? `${a.a || 0} absent · ${a.l || 0} leave` : ""; }, pick: aOpen });
+}
+A.aMonth = b => { if (b.value) { C.am = b.value; cAtt($("cbody")); } };
+A.aWd = b => patch(P.k("attendance", C.cls), [{ k: `${C.am}._wd`, v: b.value === "" ? null : +b.value }]).then(() => toast("Working days saved")).catch(x => toast(x.message, true));
+function aOpen(id) {
+  const a = attOf(C.cls, C.am, id) || {};
+  sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">${esc(monthLabel(C.am))}</p><div class="row"><label class="fl">Days absent<input id="aa" type="number" inputmode="numeric" min="0" value="${a.a ?? ""}" placeholder="0" autofocus></label><label class="fl">Leaves taken<input id="al" type="number" inputmode="numeric" min="0" value="${a.l ?? ""}" placeholder="0"></label></div><p></p><div class="row"><button class="btn" data-a="aSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button>${a.t ? `<button class="btn alt" data-a="aClear" data-id="${esc(id)}">Clear</button>` : ""}</div><div class="err" id="e2"></div>`);
+  $("sheet").onkeydown = ev => { if (ev.key === "Enter") A.aSave($("sheet").querySelector("[data-a=aSave]")); };
+}
+A.aSave = b => busy(b, async () => {
+  const sid = b.dataset.id, a = +$("aa").value || 0, l = +$("al").value || 0; if (a < 0 || l < 0 || a > 31 || l > 31) return $("e2").textContent = "Enter days between 0 and 31.";
+  try { await patch(P.k("attendance", C.cls), [{ k: `${C.am}.${sid}`, v: { a, l, by: S.me.name, t: Date.now() } }]); } catch (x) { return $("e2").textContent = x.message; }
+  dirty = false; entryDraw("a"); const n = entryNext("a", sid); n ? aOpen(n.id) : closeSheet(true);
+});
+A.aClear = async b => { try { await patch(P.k("attendance", C.cls), [{ k: `${C.am}.${b.dataset.id}`, v: null }]); } catch (x) { return toast(x.message, true); } entryDraw("a"); closeSheet(true); };
+function attRows(cls, sid, y = ayStart()) {
+  const at = FD("attendance", cls); return Object.keys(at).filter(m => /^\d{4}-\d{2}$/.test(m) && m >= y + "-04" && m <= (y + 1) + "-03" && at[m][sid]).sort().map(m => ({ m, wd: at[m]._wd, a: at[m][sid].a || 0, l: at[m][sid].l || 0 }));
+}
+function attHTML(cls, sid) {
+  const rows = attRows(cls, sid); if (!rows.length) return `<p class="sub">No attendance entered for ${fyLab(ayStart())}.</p>`;
+  return rows.map(x => `<div class="li"><span>${esc(monthLabel(x.m))}</span><b>${x.a} absent · ${x.l} leave</b></div>`).join("") + `<div class="li"><span>Total</span><b>${rows.reduce((n, x) => n + x.a, 0)} absent · ${rows.reduce((n, x) => n + x.l, 0)} leave</b></div>`;
+}
 
 /* ===== insights.js ===== */
 /* ===== Insights: class analytics, single-student page, printable reports ===== */
@@ -561,8 +934,8 @@ function sDraw() {
   if (inch) {
     const f = fineRows(I.cls, s.id).sort((a, b) => b.date.localeCompare(a.date)), cl = callsOf(I.cls, s.id);
     h += `<div class="grid2"><div class="card"><h3>Fines & dues</h3>${f.map(x => `<div class="li"><span>${fmtD(x.date)} · ${FTYPE[x.type]}</span><b>${rupee(x.amt)} ${x.paid ? "✓" : pill("due", "bad")}</b></div>`).join("") || `<p class="sub">None.</p>`}<div class="li"><span>Pending total</span><b>${rupee(fineDue(I.cls, s.id))}</b></div></div>
-     <div class="card"><h3>Fee status</h3>${S.cfg.terms.map(t => { const r = feeRec(I.cls, t, s.id); return `<div class="li"><span>${esc(t)}</span><b>${!r ? "—" : feeLeft(r) ? pill(rupee(feeLeft(r)) + " left", "bad") : "Cleared ✓"}</b></div>`; }).join("")}</div></div>
-     <div class="card"><h3>Parent calls</h3>${cl.slice(0, 6).map(c => `<div class="li"><span>${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("") || `<p class="sub">No calls logged.</p>`}</div>`;
+     <div class="card"><h3>Fee status ${fyLab(ayStart())}</h3>${feeSummary(I.cls, s.id)}</div></div>
+     <div class="card"><h3>Parent calls</h3>${cl.slice(0, 6).map(c => `<div class="li"><span>${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("") || `<p class="sub">No calls logged.</p>`}</div><div class="card"><h3>Attendance ${fyLab(ayStart())}</h3>${attHTML(I.cls, s.id)}</div>`;
   }
   $("sbody").innerHTML = h;
 }
@@ -571,27 +944,51 @@ function sDraw() {
 function iReports(host) {
   const inch = inchargeClasses().includes(I.cls);
   host.innerHTML = `<div class="card"><h3>Print or save as PDF</h3><p class="sub">Opens the print dialog. Choose "Save as PDF" to keep a copy.</p><div class="row"><button class="btn" data-a="repSheet">Class marks sheet</button><button class="btn" data-a="repCards">Report cards (whole class)</button>${inch ? `<button class="btn" data-a="repDef">Defaulters list</button>` : ""}</div></div>`;
-  host.insertAdjacentHTML("beforeend", exportHTML()); xPer();
+  host.insertAdjacentHTML("beforeend", exportHTML() + importHTML()); xPer(); xScopeDraw();
 }
-function printHTML(html) { $("print").innerHTML = html; setTimeout(() => print(), 50); }
-const rhead = t => `<div class="rh"><b>${esc(S.cfg.school)}</b><span>${esc(t)} · ${fmtD(today())}</span></div>`;
+function printHTML(html, css) { $("print").innerHTML = (css ? `<style>${css}</style>` : "") + html; setTimeout(() => print(), 50); }
+const rhead = (t, logo = 1) => `<div class="rh">${logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<b>${esc(S.cfg.school)}</b><span>${esc(t)} · ${fmtD(today())}</span></div>`;
 A.repSheet = () => {
   const st = stats(I.cls), subs = subjectsOf(I.cls);
   printHTML(`${rhead("Class " + I.cls + " marks sheet")}<table class="pt"><tr><th>Student</th>${subs.map(s => `<th>${esc(s)} %</th>`).join("")}<th>Overall %</th><th>Notebook %</th></tr>${st.rows.map(r => `<tr><td>${esc(r.s.name)}</td>${subs.map(s => `<td>${r0(avg(r.sub[s] || []))}</td>`).join("")}<td><b>${r0(r.avg)}</b></td><td>${r0(r.nb)}</td></tr>`).join("")}<tr><td><b>Class average</b></td>${subs.map(s => `<td>${r0(avg(st.rows.flatMap(r => r.sub[s] || [])))}</td>`).join("")}<td><b>${r0(st.classAvg)}</b></td><td>${r0(st.nbPct)}</td></tr></table>`);
 };
-function cardHTML(r, st) {
-  const subs = subjectsOf(I.cls), inch = inchargeClasses().includes(I.cls), tests = r.pts.slice().sort((a, b) => a.sub.localeCompare(b.sub) || a.date.localeCompare(b.date));
-  return `<section class="rc">${rhead("Progress report")}<h2>${esc(r.s.name)} <small>Class ${esc(I.cls)}</small></h2>
-   <table class="pt"><tr><th>Subject</th><th>Tests</th><th>Average</th><th>Class avg</th><th>Notebook</th></tr>${subs.map(s => { const v = r.sub[s] || [], ch = (D[P.syl(I.cls, s)] || {}).chapters || [], en = (D[P.nb(I.cls, s)] || {}).entries || {}, d = Object.keys(en).filter(k => en[k][r.s.id]).sort().pop(), t = ch.filter(taught).length; return `<tr><td>${esc(s)}</td><td>${v.length}</td><td><b>${r0(avg(v))}</b></td><td>${r0(avg(st.rows.flatMap(x => x.sub[s] || [])))}</td><td>${d && t ? Math.round(nbDone(en[d][r.s.id], ch) / t * 100) + "%" : "—"}</td></tr>`; }).join("")}<tr><td><b>Overall</b></td><td>${r.pts.length}</td><td><b>${r0(r.avg)}</b></td><td>${r0(st.classAvg)}</td><td>${r0(r.nb)}</td></tr></table>
-   <div class="rbars">${subs.map(s => bar(s, avg(r.sub[s] || []), "#2d8a7a")).join("")}</div>
-   <h4>Test details</h4><table class="pt">${tests.map(p => `<tr><td>${esc(p.sub)}</td><td>${esc(p.x)}</td><td>${fmtD(p.date)}</td><td>${Math.round(p.y)}%</td></tr>`).join("") || "<tr><td>No tests recorded.</td></tr>"}</table>
-   ${inch ? `<p>Fines pending: <b>${rupee(fineDue(I.cls, r.s.id))}</b> · Fees pending: <b>${rupee(S.cfg.terms.reduce((n, t) => n + feeLeft(feeRec(I.cls, t, r.s.id)), 0))}</b></p>` : ""}${r.risk.length ? `<p>Attention: ${esc(r.risk.join(", "))}</p>` : ""}<div class="sig"><span>Class teacher</span><span>Parent</span></div></section>`;
+/* ----- report cards: the teacher chooses what each card contains ----- */
+const RC_DEF = { logo: 1, sub: 1, tests: 1, term: 1, nb: 1, fine: 1, fee: 1, att: 1, calls: 0, attn: 1, sig: 1 };
+const rcOpt = () => { try { return Object.assign({}, RC_DEF, JSON.parse(localStorage.rcopt || "{}")); } catch { return Object.assign({}, RC_DEF); } };
+function termTable(cls, sid, subs) {
+  const terms = S.cfg.terms.filter(t => subs.some(s => getAt(D[P.marks(cls, s)] || {}, ["tests", tTid(t)]))); if (!terms.length) return "";
+  const cell = (s, t) => { const e = getAt(D[P.marks(cls, s)] || {}, ["marks", tTid(t), sid]); return !e ? "–" : e.ab ? "Ab" : e.m + "/" + e.max; };
+  return `<h4>Term exams</h4><table class="pt"><tr><th>Subject</th>${terms.map(t => `<th>${esc(t)}</th>`).join("")}</tr>${subs.map(s => `<tr><td>${esc(s)}</td>${terms.map(t => `<td>${cell(s, t)}</td>`).join("")}</tr>`).join("")}</table>`;
 }
-A.repCards = () => { const st = stats(I.cls); printHTML(st.rows.map(r => cardHTML(r, st)).join("")); };
-A.repOne = () => { const st = stats(I.cls), r = st.rows.find(x => x.s.id === I.sid); if (r) printHTML(cardHTML(r, st)); };
+function cardHTML(r, st, o) {
+  const subs = subjectsOf(I.cls), inch = inchargeClasses().includes(I.cls), sid = r.s.id, y = ayStart();
+  const tests = r.pts.filter(p => !p.term).sort((a, b) => a.sub.localeCompare(b.sub) || a.date.localeCompare(b.date));
+  let h = `<section class="rc">${rhead("Progress report", o.logo)}<h2>${esc(r.s.name)} <small>Class ${esc(I.cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</small></h2>`;
+  if (o.sub) h += `<table class="pt"><tr><th>Subject</th><th>Tests</th><th>Average</th><th>Class avg</th></tr>${subs.map(s => { const v = r.sub[s] || []; return `<tr><td>${esc(s)}</td><td>${v.length}</td><td><b>${r0(avg(v))}</b></td><td>${r0(avg(st.rows.flatMap(x => x.sub[s] || [])))}</td></tr>`; }).join("")}<tr><td><b>Overall</b></td><td>${r.pts.length}</td><td><b>${r0(r.avg)}</b></td><td>${r0(st.classAvg)}</td></tr></table>`;
+  if (o.term) h += termTable(I.cls, sid, subs);
+  if (o.tests) h += `<h4>Test details</h4><table class="pt">${tests.map(p => `<tr><td>${esc(p.sub)}</td><td>${esc(p.x)}</td><td>${fmtD(p.date)}</td><td>${Math.round(p.y)}%</td></tr>`).join("") || "<tr><td>No tests recorded.</td></tr>"}</table>`;
+  if (o.nb) h += `<h4>Notebooks</h4><table class="pt"><tr><th>Subject</th><th>Chapters done</th><th>%</th></tr>${subs.map(s => { const ch = (D[P.syl(I.cls, s)] || {}).chapters || [], en = (D[P.nb(I.cls, s)] || {}).entries || {}, d = Object.keys(en).filter(k => en[k][sid]).sort().pop(), t = ch.filter(taught).length; return `<tr><td>${esc(s)}</td><td>${d && t ? nbDone(en[d][sid], ch) + "/" + t + " · " + fmtD(d) : "—"}</td><td>${d && t ? Math.round(nbDone(en[d][sid], ch) / t * 100) + "%" : "—"}</td></tr>`; }).join("")}</table>`;
+  if (inch && o.att) { const rows = attRows(I.cls, sid, y); h += `<h4>Attendance ${fyLab(y)}</h4>` + (rows.length ? `<table class="pt"><tr><th>Month</th><th>Working days</th><th>Absent</th><th>Leaves</th></tr>${rows.map(x => `<tr><td>${esc(monthLabel(x.m))}</td><td>${x.wd ?? "—"}</td><td>${x.a}</td><td>${x.l}</td></tr>`).join("")}<tr><td><b>Total</b></td><td></td><td><b>${rows.reduce((n, x) => n + x.a, 0)}</b></td><td><b>${rows.reduce((n, x) => n + x.l, 0)}</b></td></tr></table>` : `<p>No attendance entered.</p>`); }
+  if (inch && (o.fine || o.fee)) h += `<p>${o.fine ? `Fines pending: <b>${rupee(fineDue(I.cls, sid))}</b>` : ""}${o.fine && o.fee ? " · " : ""}${o.fee ? (() => { const c = fyCalc(I.cls, y, sid); return `Fees ${fyLab(y)}: <b>${esc(c.r ? fyText(I.cls, y, sid) : "no record")}</b>${c.owedM > 0 ? ` (${fyM(c.owedM)} pending)` : ""}${c.bal != null ? ` · due ${rupee(c.bal)}` : ""}`; })() : ""}</p>`;
+  if (inch && o.calls) { const cl = callsOf(I.cls, sid).slice(0, 3); if (cl.length) h += `<h4>Parent contact</h4><p>${cl.map(c => `${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}`).join("<br>")}</p>`; }
+  if (o.attn && r.risk.length) h += `<p>Attention: ${esc(r.risk.join(", "))}</p>`;
+  return h + `<div class="sig"><span>${o.sig && S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}Class teacher</span><span>Parent</span></div></section>`;
+}
+function rcAsk(scope) {
+  const o = rcOpt(), inch = inchargeClasses().includes(I.cls);
+  const L = [["sub", "Subject-wise summary (tests, average, class average)"], ["tests", "Test-by-test marks"], ["term", "Term exam marks"], ["nb", "Notebook status"], ["att", "Absent days & leaves (month-wise)", 1], ["fine", "Fines pending", 1], ["fee", "Fees (month-wise status)", 1], ["calls", "Parent call notes", 1], ["attn", "Attention / at-risk note"], ["logo", "School logo in the header"], ["sig", "My signature (class teacher)"]];
+  sheetL(`<h2>What should the report card show?</h2><p class="sub">Tick the details to include. Your choice is remembered.</p><div class="xsets" id="rcchk">${L.filter(x => !x[2] || inch).map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div><div class="row"><button class="btn" data-a="rcGo" data-s="${scope}" style="flex:2">${ic("print", 18)} Print ${scope === "all" ? "whole class" : "this student"}</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+}
+A.rcGo = b => {
+  const o = rcOpt(); document.querySelectorAll("#rcchk input").forEach(i => o[i.value] = i.checked ? 1 : 0);
+  try { localStorage.rcopt = JSON.stringify(o); } catch { } closeSheet(true);
+  const st = stats(I.cls), rows = b.dataset.s === "all" ? st.rows : st.rows.filter(x => x.s.id === I.sid);
+  if (rows.length) printHTML(rows.map(r => cardHTML(r, st, o)).join(""));
+};
+A.repCards = () => rcAsk("all"); A.repOne = () => rcAsk("one");
 A.repDef = () => {
-  const rows = classStudents(I.cls).map(s => ({ s, f: fineDue(I.cls, s.id), t: S.cfg.terms.map(t => ({ t, l: feeLeft(feeRec(I.cls, t, s.id)) })).filter(x => x.l > 0) })).filter(x => x.f || x.t.length);
-  printHTML(`${rhead("Class " + I.cls + " defaulters")}<table class="pt"><tr><th>Student</th><th>Fines pending</th><th>Fees pending</th><th>Total</th></tr>${rows.map(x => `<tr><td>${esc(x.s.name)}</td><td>${rupee(x.f)}</td><td>${x.t.map(y => esc(y.t) + ": " + rupee(y.l)).join("<br>") || "—"}</td><td><b>${rupee(x.f + x.t.reduce((n, y) => n + y.l, 0))}</b></td></tr>`).join("") || "<tr><td>No defaulters 🎉</td></tr>"}</table>`);
+  const y = ayStart(), rows = classStudents(I.cls).map(s => ({ s, f: fineDue(I.cls, s.id), c: fyCalc(I.cls, y, s.id) })).filter(x => x.f || (x.c.r && x.c.owedM > 0));
+  printHTML(`${rhead("Class " + I.cls + " defaulters")}<table class="pt"><tr><th>Student</th><th>Fines pending</th><th>Fees ${fyLab(y)}</th><th>Months pending</th><th>Due amount</th></tr>${rows.map(x => `<tr><td>${esc(x.s.name)}</td><td>${rupee(x.f)}</td><td>${esc(x.c.r ? fyText(I.cls, y, x.s.id) : "—")}</td><td>${x.c.owedM > 0 ? fyM(x.c.owedM) : "—"}</td><td>${x.c.bal != null ? rupee(x.c.bal) : "—"}</td></tr>`).join("") || "<tr><td>No defaulters 🎉</td></tr>"}</table>`);
 };
 
 /* ===== admin.js ===== */
@@ -665,7 +1062,7 @@ A.sBulkGo = b => busy(b, async () => {
 async function adSettings(host) {
   const c = S.cfg;
   host.innerHTML = `<div class="card" id="shcard"><h3>Google Sheets backup</h3><p class="sub" id="shst">Checking…</p><div class="row"><button class="btn alt" data-a="shTest">Test connection</button><button class="btn" data-a="shSync">Sync all data now</button></div><div class="sub" id="shlog" role="status"></div></div>
-   <div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Subjects<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Fee terms<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
+   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Subjects<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
   shStatus();
   try { const l = (await api("GET", "/admin/audit")).log.slice(0, 12); $("aud").innerHTML = l.map(x => `<div class="li"><span>${esc(x.who)} ${esc(x.what)}</span><small>${new Date(x.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div>`).join("") || "Nothing yet."; } catch { $("aud").textContent = ""; }
 }
@@ -702,18 +1099,27 @@ A.shSync = b => busy(b, async () => {
 });
 
 /* ===== export.js ===== */
-/* ===== Excel export: pick class(es), a period (date / month / year / all time) and which records to include ===== */
-const X = { mode: "month" };
-const XSETS = [["nb", "Notebook checking record"], ["test", "Test record"], ["fee", "Fees record", 1], ["call", "Calls record", 1], ["fine", "Fines & dues record", 1], ["all", "Combined data (one summary row per student)"]];
+/* ===== Excel export + import. "My class" = everything for the class you are incharge of;
+   "Subject-wise" = chosen subjects of any class you teach, several classes in one file. ===== */
+const X = { mode: "month", scope: "" };
+const XSETS = [["nb", "Notebook checking record", "s"], ["test", "Test record (unit + term exams)", "s"], ["all", "Combined data (one summary row per student)", "s"], ["att", "Attendance record", "c"], ["fee", "Fees record (month-wise)", "c"], ["call", "Calls record", "c"], ["fine", "Fines & dues record", "c"]];
 
 function exportHTML() {
-  const cs = myClasses(), hasInch = inchargeClasses().length > 0;
-  return `<div class="card" id="xcard"><h3>Export to Excel</h3><p class="sub">Choose a class, a time period and what to include. You get one Excel file with a sheet for each record type.</p>
-   <div class="form"><label>Class<select id="xcls">${cs.length > 1 ? `<option value="*">All my classes (${cs.length})</option>` : ""}${cs.map(c => `<option ${c === I.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div>
+  const ic2 = inchargeClasses(); if (!X.scope || (X.scope === "c" && !ic2.length)) X.scope = ic2.length ? "c" : "s";
+  return `<div class="card" id="xcard"><h3>Export to Excel</h3><p class="sub">${ic2.length ? "Export everything for your own class, or pick subjects (even from several classes) for one file." : "Pick the subjects to export. You can combine different classes in one file."}</p>
+   <div class="seg" id="xscope">${ic2.length ? `<button data-a="xScope" data-s="c" class="${X.scope === "c" ? "on" : ""}">My class: all data</button>` : ""}<button data-a="xScope" data-s="s" class="${X.scope === "s" ? "on" : ""}">Subject-wise</button></div><div id="xsc"></div>
    <div class="seg" id="xmodes">${[["date", "Date"], ["month", "Month"], ["year", "Year"], ["all", "All time"]].map(([k, v]) => `<button data-a="xMode" data-m="${k}" class="${X.mode === k ? "on" : ""}">${v}</button>`).join("")}</div><div id="xper"></div>
-   <div class="xsets" id="xsets">${XSETS.map(([k, v, inc]) => `<label class="cb ${inc && !hasInch ? "dis" : ""}"><input type="checkbox" value="${k}" ${inc && !hasInch ? "disabled" : (k === "nb" || k === "test" ? "checked" : "")}> ${v}${inc ? `<small>incharge only</small>` : ""}</label>`).join("")}</div>
-   <button class="btn" data-a="xGo">${ic("print", 18)} Download Excel</button><div class="err" id="xerr" role="alert"></div></div>`;
+   <div class="xsets" id="xsets"></div><button class="btn" data-a="xGo">${ic("print", 18)} Download Excel</button><div class="err" id="xerr" role="alert"></div></div>`;
 }
+function xScopeDraw() {
+  const ic2 = inchargeClasses(), cs = myClasses(), el = $("xsc"); if (!el) return;
+  el.innerHTML = X.scope === "c"
+    ? `<div class="form"><label>Class<select id="xcls">${ic2.length > 1 ? `<option value="*">All my classes (${ic2.length})</option>` : ""}${ic2.map(c => `<option ${c === I.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label></div><p class="sub">All subjects' marks and notebooks, plus attendance, fees, calls and fines of the class.</p>`
+    : `<p class="sub">Tick the subjects to export.</p>${cs.map(c => `<div class="asg"><b>${esc(c)}</b>${subjectsOf(c).map(s => `<label class="cb"><input type="checkbox" class="xsub" data-cl="${esc(c)}" data-su="${esc(s)}"> ${esc(s)}</label>`).join("")}<button class="link" data-a="xAll" data-cl="${esc(c)}">All</button></div>`).join("")}`;
+  $("xsets").innerHTML = XSETS.filter(x => X.scope === "c" || x[2] === "s").map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" checked> ${v}</label>`).join("");
+}
+A.xScope = b => { X.scope = b.dataset.s; document.querySelectorAll("#xscope button").forEach(x => x.classList.toggle("on", x === b)); xScopeDraw(); };
+A.xAll = b => { const bx = [...document.querySelectorAll(`.xsub[data-cl="${b.dataset.cl}"]`)], on = bx.some(i => !i.checked); bx.forEach(i => i.checked = on); };
 function xPer() {
   const y = new Date().getFullYear(), t = today(), el = $("xper"); if (!el) return;
   el.innerHTML = X.mode === "date" ? `<div class="row"><label class="fl">From<input id="xf" type="date" value="${t}"></label><label class="fl">To<input id="xt" type="date" value="${t}"></label></div><p class="sub">Use the same date in both boxes for a single day.</p>`
@@ -736,23 +1142,26 @@ A.xGo = b => busy(b, async () => {
   $("xerr").textContent = "";
   try {
     const sets = new Set([...document.querySelectorAll("#xsets input:checked")].map(i => i.value)); if (!sets.size) throw new Error("Tick at least one record type.");
-    const rg = xRange(), sel = $("xcls").value, classes = sel === "*" ? myClasses() : [sel], inR = d => !!d && d >= rg.from && d <= rg.to, inchC = inchargeClasses();
+    const rg = xRange(), inR = d => !!d && d >= rg.from && d <= rg.to; let jobs = [];
+    if (X.scope === "c") { const sel = $("xcls").value; jobs = (sel === "*" ? inchargeClasses() : [sel]).map(c => ({ c, subs: subjectsOf(c), full: true })); }
+    else { const by = {}; document.querySelectorAll(".xsub:checked").forEach(i => (by[i.dataset.cl] = by[i.dataset.cl] || []).push(i.dataset.su)); jobs = Object.entries(by).map(([c, subs]) => ({ c, subs, full: false })); if (!jobs.length) throw new Error("Tick at least one subject."); }
     await loadXlsx();
-    const out = {}, add = (name, h, row) => (out[name] = out[name] || { h, rows: [] }).rows.push(row), skipped = [];
-    const H = { test: ["Class", "Subject", "Test", "Date", "Student", "Marks", "Out of", "Percent", "Remark", "Entered by"], nb: ["Class", "Subject", "Date", "Student", "Chapters done", "Chapters checked", "Percent", "Chapter details", "Remark", "Entered by"],
-      pay: ["Class", "Term", "Student", "Payment date", "Amount paid", "Term fee", "Entered by"], bal: ["Class", "Term", "Student", "Amount due", "Paid so far", "Balance", "Status"], call: ["Class", "Student", "Date", "Parent's response", "Remark", "Entered by"],
+    const out = {}, add = (name, h, row) => (out[name] = out[name] || { h, rows: [] }).rows.push(row);
+    const H = { test: ["Class", "Subject", "Test", "Date", "Student", "Marks", "Out of", "Percent", "Remark", "Entered by", "Type"], nb: ["Class", "Subject", "Date", "Student", "Chapters done", "Chapters checked", "Percent", "Chapter details", "Remark", "Entered by"],
+      fee: ["Class", "Year", "Student", "Total fee", "Paid", "Due", ...MN, "Status", "Entered by"], att: ["Class", "Month", "Student", "Working days", "Absent days", "Leaves", "Entered by"], call: ["Class", "Student", "Date", "Parent's response", "Remark", "Entered by"],
       fine: ["Class", "Student", "Date", "Type", "Amount", "Paid", "Paid on", "Remark", "Entered by"] };
-    const subs = S.cfg.subjects, HC = ["Class", "Student", "Tests taken", "Average %", ...subs.map(s => s + " %"), "Notebook checks", "Notebook %", "Calls made", "Last call", "Last response", "Fines added", "Fines pending now", "Fee paid in period", "Fee balance now"];
-    for (const c of classes) {
-      toast("Collecting class " + c + "…"); await bundle(c, true);
-      const stu = classStudents(c), isInch = inchC.includes(c), acc = {};
+    const all = S.cfg.subjects, HC = ["Class", "Student", "Tests taken", "Average %", ...all.map(s => s + " %"), "Notebook checks", "Notebook %", "Calls made", "Last call", "Last response", "Fines added", "Fines pending now", "Fee paid (amount entered)", "Fee due (amount entered)"];
+    for (const { c, subs: sl, full } of jobs) {
+      toast("Collecting class " + c + "…");
+      await load([...sl.flatMap(s => [P.marks(c, s), P.nb(c, s), P.syl(c, s)]), ...(full ? ["fines", "calls", "fees", "attendance"].map(k => P.k(k, c)) : [])], true);
+      const stu = classStudents(c), acc = {};
       stu.forEach(s => acc[s.id] = { pts: [], sub: {}, nbP: [], calls: [], fAdd: 0, fPend: 0, fPaid: 0, fBal: 0 });
-      subjectsOf(c).forEach(sub => {
+      sl.forEach(sub => {
         const mf = D[P.marks(c, sub)] || {}, ch = (D[P.syl(c, sub)] || {}).chapters || [], en = (D[P.nb(c, sub)] || {}).entries || {}, tc = ch.filter(taught).length;
         Object.entries(mf.tests || {}).filter(([, t]) => inR(t.date)).sort((a, z) => a[1].date.localeCompare(z[1].date)).forEach(([tid, t]) => stu.forEach(s => {
-          const e = getAt(mf, ["marks", tid, s.id]);
-          if (sets.has("test")) add("Test record", H.test, [c, sub, t.name, t.date, s.name, e ? e.m : "", e ? e.max : t.max, e ? pc(e.m, e.max) : "", e ? (e.r || "") : "Not entered", e ? (e.by || "") : ""]);
-          if (e) { const p = e.m / e.max * 100; acc[s.id].pts.push(p); (acc[s.id].sub[sub] = acc[s.id].sub[sub] || []).push(p); }
+          const e = getAt(mf, ["marks", tid, s.id]), ok = e && !e.ab;
+          if (sets.has("test")) add("Test record", H.test, [c, sub, t.name, t.date, s.name, ok ? e.m : "", e ? e.max : t.max, ok ? pc(e.m, e.max) : "", e ? (e.ab ? "Absent" : e.r || "") : "Not entered", e ? e.by || "" : "", t.term ? "Term" : "Unit"]);
+          if (ok) { const p = e.m / e.max * 100; acc[s.id].pts.push(p); (acc[s.id].sub[sub] = acc[s.id].sub[sub] || []).push(p); }
         }));
         Object.keys(en).filter(inR).sort().forEach(d => stu.forEach(s => {
           const e = en[d][s.id]; if (!e) return; const done = nbDone(e, ch);
@@ -760,26 +1169,101 @@ A.xGo = b => busy(b, async () => {
           if (tc) acc[s.id].nbP.push(done / tc * 100);
         }));
       });
-      if (isInch) {
-        const fees = S.cfg.terms;
-        stu.forEach(s => fees.forEach(t => {
-          const r = feeRec(c, t, s.id); if (!r) return; const left = feeLeft(r);
-          (r.pays || []).filter(p => inR(p.d)).forEach(p => { acc[s.id].fPaid += p.a; if (sets.has("fee")) add("Fees - payments", H.pay, [c, t, s.name, p.d, p.a, r.due, r.by || ""]); });
-          acc[s.id].fBal += left; if (sets.has("fee")) add("Fees - balances", H.bal, [c, t, s.name, r.due, feePaid(r), left, left === 0 ? "Cleared" : feePaid(r) > 0 ? "Partial" : "Unpaid"]);
-        }));
+      if (full) {
+        const fe = FD("fees", c);
+        Object.keys(fe).filter(k => /^Y_\d{4}-\d{2}$/.test(k)).sort().forEach(k => { const y = +k.slice(2, 6); if (`${y}-04-01` > rg.to || `${y + 1}-03-31` < rg.from) return; stu.forEach(s => { const r = fe[k][s.id]; if (!r) return; const cl = fyCalc(c, y, s.id); acc[s.id].fPaid += r.paid || 0; acc[s.id].fBal += cl.bal || 0; if (sets.has("fee")) add("Fees", H.fee, [c, fyLab(y), s.name, r.total ?? "", r.paid ?? "", cl.bal ?? "", ...fyMonths(y).map(m => ["", "Half", "Full"][(r.months || {})[m.k] || 0]), fyTxt(r.months || {}, y), r.by || ""]); }); });
+        const at = FD("attendance", c);
+        Object.keys(at).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from).sort().forEach(m => stu.forEach(s => { const a = at[m][s.id]; if (a && sets.has("att")) add("Attendance", H.att, [c, m, s.name, at[m]._wd ?? "", a.a || 0, a.l || 0, a.by || ""]); }));
         callsOf(c).filter(k => inR(k.date)).reverse().forEach(k => { const s = stuById(k.sid); if (!s || !acc[s.id]) return; acc[s.id].calls.push(k); if (sets.has("call")) add("Calls record", H.call, [c, s.name, k.date, k.resp, k.r || "", k.by || ""]); });
         fineRows(c).sort((a, z) => a.date.localeCompare(z.date)).forEach(f => { const s = stuById(f.sid); if (!s || !acc[s.id]) return; if (!f.paid) acc[s.id].fPend += f.amt; if (inR(f.date)) { acc[s.id].fAdd += f.amt; if (sets.has("fine")) add("Fines record", H.fine, [c, s.name, f.date, FTYPE[f.type] || f.type, f.amt, f.paid ? "Yes" : "No", f.pd || "", f.r || "", f.by || ""]); } });
-      } else if (["fee", "call", "fine"].some(k => sets.has(k)) || sets.has("all")) skipped.push(c);
-      if (sets.has("all")) stu.forEach(s => { const a = acc[s.id], lc = a.calls[a.calls.length - 1]; add("Combined", HC, [c, s.name, a.pts.length, a.pts.length ? Math.round(avg(a.pts) * 10) / 10 : "", ...subs.map(x => a.sub[x] ? Math.round(avg(a.sub[x]) * 10) / 10 : ""), a.nbP.length, a.nbP.length ? Math.round(avg(a.nbP) * 10) / 10 : "", isInch ? a.calls.length : "", lc ? lc.date : "", lc ? lc.resp : "", isInch ? a.fAdd : "", isInch ? a.fPend : "", isInch ? a.fPaid : "", isInch ? a.fBal : ""]); });
+      }
+      if (sets.has("all")) stu.forEach(s => { const a = acc[s.id], lc = a.calls[a.calls.length - 1]; add("Combined", HC, [c, s.name, a.pts.length, a.pts.length ? Math.round(avg(a.pts) * 10) / 10 : "", ...all.map(x => a.sub[x] ? Math.round(avg(a.sub[x]) * 10) / 10 : ""), a.nbP.length, a.nbP.length ? Math.round(avg(a.nbP) * 10) / 10 : "", full ? a.calls.length : "", lc ? lc.date : "", lc ? lc.resp : "", full ? a.fAdd : "", full ? a.fPend : "", full ? a.fPaid : "", full ? a.fBal : ""]); });
     }
-    const order = ["Combined", "Test record", "Notebook record", "Fees - payments", "Fees - balances", "Calls record", "Fines record"], names = order.filter(n => out[n]);
+    const order = ["Combined", "Test record", "Notebook record", "Attendance", "Fees", "Calls record", "Fines record"], names = order.filter(n => out[n]);
     const total = names.reduce((n, k) => n + out[k].rows.length, 0); if (!total) throw new Error("No records found for " + rg.text + ".");
-    const wb = XLSX.utils.book_new(), sheet = (n, h, rows) => { const ws = XLSX.utils.aoa_to_sheet([h, ...rows]); ws["!cols"] = h.map((x, i) => ({ wch: Math.min(48, Math.max(String(x).length, ...rows.slice(0, 300).map(r => String(r[i] ?? "").length)) + 2) })); XLSX.utils.book_append_sheet(wb, ws, n.slice(0, 31)); };
-    sheet("Info", ["Item", "Details"], [["School", S.cfg.school], ["Classes", classes.join(", ")], ["Period", rg.text], ["Included", names.join(", ")], ["Exported by", S.me.name], ["Exported on", new Date().toLocaleString("en-IN")], ...(skipped.length ? [["Note", "Fees, calls and fines are only included for classes where you are the incharge. Not included for: " + skipped.join(", ")]] : [])]);
-    names.forEach(n => sheet(n, out[n].h, out[n].rows));
-    XLSX.writeFile(wb, `School-Records_${sel === "*" ? "all-classes" : sel}_${rg.label}.xlsx`);
+    const wb = XLSX.utils.book_new(), addSheet = (n, h, rows) => { const ws = XLSX.utils.aoa_to_sheet([h, ...rows]); ws["!cols"] = h.map((x, i) => ({ wch: Math.min(48, Math.max(String(x).length, ...rows.slice(0, 300).map(r => String(r[i] ?? "").length)) + 2) })); XLSX.utils.book_append_sheet(wb, ws, n.slice(0, 31)); };
+    addSheet("Info", ["Item", "Details"], [["School", S.cfg.school], ["Classes", jobs.map(j => j.c).join(", ")], ["Subjects", X.scope === "c" ? "All subjects" : [...new Set(jobs.flatMap(j => j.subs))].join(", ")], ["Period", rg.text], ["Included", names.join(", ")], ["Exported by", S.me.name], ["Exported on", new Date().toLocaleString("en-IN")]]);
+    names.forEach(n => addSheet(n, out[n].h, out[n].rows));
+    XLSX.writeFile(wb, `School-Records_${X.scope === "c" ? (jobs.length > 1 ? "all-classes" : jobs[0].c) : "subjects"}_${rg.label}.xlsx`);
     toast(`Excel file ready: ${total} rows`);
   } catch (e) { $("xerr").textContent = e.message; }
+});
+
+/* ----- import: reads a file exported by this app (same sheets and columns) ----- */
+function importHTML() {
+  return `<div class="card" id="icard"><h3>Import from Excel</h3><p class="sub">Choose a file exported from this app (same sheets and columns). You see a summary before anything is saved. Only the classes and subjects you can edit are imported.</p><input type="file" id="xfile" accept=".xlsx,.xls" aria-label="Excel file"><p></p><button class="btn" data-a="impRead">Read file</button><div class="err" id="ierr" role="alert"></div></div>`;
+}
+let IMP = null;
+const nd = v => { if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
+async function impPlan(wb) {
+  const R = { ops: {}, n: 0, cnt: {}, warn: [] }, now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
+  const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
+  const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; };
+  const ld = async p => { if (!seen.has(p)) { seen.add(p); await load([p], true); } return D[p] || {}; };
+  const stu = (c, n) => { const k = String(n).trim().toLowerCase(); return classStudents(c).find(s => s.name.toLowerCase() === k); };
+  const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c), skip = m => bad.add(m);
+  const str = v => String(v ?? "").trim();
+  for (const r of rows("Test record")) {
+    const c = str(r.Class), sb = str(r.Subject), name = str(r.Test), date = nd(r.Date), rem = str(r.Remark), absent = rem.toLowerCase() === "absent", max = +r["Out of"];
+    if (!canSub(c, sb)) { skip(`${c} ${sb}: you cannot edit this subject`); continue; }
+    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; }
+    if (rem.toLowerCase() === "not entered" || (r.Marks === "" && !absent)) continue;
+    if (!name || !date || !(max > 0) || (!absent && !(+r.Marks >= 0 && +r.Marks <= max))) { skip(`invalid test row for ${s.name}`); continue; }
+    const path = P.marks(c, sb), f = await ld(path), term = str(r.Type) === "Term" ? S.cfg.terms.find(t => name === t + " Exam") : null; let tid, t;
+    if (term) { tid = tTid(term); t = getAt(f, ["tests", tid]); } else { const e = Object.entries(f.tests || {}).find(([, x]) => !x.term && x.name.toLowerCase() === name.toLowerCase() && x.date === date); if (e) [tid, t] = e; else tid = slug(name) + "_" + date; }
+    if (!t && !made.has(path + tid)) { made.add(path + tid); put(path, { k: "tests." + tid, v: Object.assign({ name, date, max, by }, term ? { term } : {}) }); }
+    put(path, { k: `marks.${tid}.${s.id}`, v: absent ? { ab: 1, max, r: "", by, t: now } : { m: +r.Marks, max, r: rem, by, t: now } }, "Test marks");
+  }
+  for (const r of rows("Notebook record")) {
+    const c = str(r.Class), sb = str(r.Subject), date = nd(r.Date);
+    if (!canSub(c, sb)) { skip(`${c} ${sb}: you cannot edit this subject`); continue; }
+    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!date) { skip("notebook row without a date"); continue; }
+    const ch = (await ld(P.syl(c, sb))).chapters || []; if (!ch.length) { skip(`${c} ${sb}: set the chapters first`); continue; }
+    const mp = {}; str(r["Chapter details"]).split(";").forEach(x => { const i = x.lastIndexOf(":"); if (i > 0) mp[x.slice(0, i).trim()] = x.slice(i + 1).trim().toLowerCase(); });
+    const e = { s: ch.map(x => ({ done: 1, partial: 2 }[mp[x.n]] || 0)), by, t: now }; if (str(r.Remark)) e.r = str(r.Remark);
+    put(P.nb(c, sb), { k: `entries.${date}.${s.id}`, v: e }, "Notebook entries");
+  }
+  for (const r of rows("Calls record")) {
+    const c = str(r.Class), date = nd(r.Date); if (!canInch(c)) { skip(`${c}: calls need the class incharge`); continue; }
+    const s = stu(c, r.Student); if (!s || !date) { skip(`call row for “${str(r.Student)}”`); continue; }
+    const path = P.k("calls", c), f = await ld(path), resp = str(r["Parent's response"]) || "Informed", rem = str(r.Remark);
+    if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.resp === resp && (x.r || "") === rem)) continue;
+    put(path, { k: "items." + uid("c") + R.n.toString(36), v: { sid: s.id, date, resp, r: rem, by, t: now } }, "Calls");
+  }
+  for (const r of rows("Fines record")) {
+    const c = str(r.Class), date = nd(r.Date), amt = +r.Amount; if (!canInch(c)) { skip(`${c}: fines need the class incharge`); continue; }
+    const s = stu(c, r.Student); if (!s || !date || !(amt > 0)) { skip(`fine row for “${str(r.Student)}”`); continue; }
+    const type = (Object.entries(FTYPE).find(([, v]) => v.toLowerCase() === str(r.Type).toLowerCase()) || ["other"])[0], path = P.k("fines", c), f = await ld(path), paid = str(r.Paid).toLowerCase() === "yes" ? 1 : 0;
+    if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.type === type && x.amt === amt)) continue;
+    const v = { sid: s.id, type, amt, date, paid, r: str(r.Remark), by, t: now }; if (paid) v.pd = nd(r["Paid on"]) || date;
+    put(path, { k: "items." + uid("f") + R.n.toString(36), v }, "Fines");
+  }
+  for (const r of rows("Fees")) {
+    const c = str(r.Class); if (!canInch(c)) { skip(`${c}: fees need the class incharge`); continue; }
+    const s = stu(c, r.Student), y = +(/^(\d{4})/.exec(str(r.Year)) || [])[1]; if (!s || !y) { skip(`fee row for “${str(r.Student)}”`); continue; }
+    const ms = {}; fyMonths(y).forEach(m => { const v = str(r[m.n]).toLowerCase(); if (v === "full") ms[m.k] = 2; else if (v === "half") ms[m.k] = 1; });
+    const total = +r["Total fee"] || 0, paid = r.Paid === "" ? NaN : +r.Paid;
+    put(P.k("fees", c), { k: `${fyKey(y)}.${s.id}`, v: Object.assign({ months: ms, by, t: now }, total ? { total } : {}, isNaN(paid) ? {} : { paid }) }, "Fee records");
+  }
+  for (const r of rows("Attendance")) {
+    const c = str(r.Class); if (!canInch(c)) { skip(`${c}: attendance needs the class incharge`); continue; }
+    const s = stu(c, r.Student), m = /^\d{4}-\d{2}$/.test(str(r.Month)) ? str(r.Month) : nd(r.Month).slice(0, 7); if (!s || !m) { skip(`attendance row for “${str(r.Student)}”`); continue; }
+    const path = P.k("attendance", c); put(path, { k: `${m}.${s.id}`, v: { a: +r["Absent days"] || 0, l: +r.Leaves || 0, by, t: now } }, "Attendance");
+    if (r["Working days"] !== "") put(path, { k: `${m}._wd`, v: +r["Working days"] });
+  }
+  R.warn = [...bad]; R.sum = Object.entries(R.cnt); return R;
+}
+A.impRead = b => busy(b, async () => {
+  $("ierr").textContent = ""; const f = $("xfile").files[0]; if (!f) return $("ierr").textContent = "Choose an Excel file first.";
+  try { await loadXlsx(); IMP = await impPlan(XLSX.read(await f.arrayBuffer(), { type: "array" })); } catch (e) { return $("ierr").textContent = e.message || "Could not read this file."; }
+  if (!IMP.n) return $("ierr").textContent = "Nothing to import. " + (IMP.warn.slice(0, 3).join(" · ") || "No sheets in the expected format were found.");
+  sheetL(`<h2>Ready to import</h2><div class="hist">${IMP.sum.map(x => `<div class="hr"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join("")}</div>${IMP.warn.length ? `<p class="sub">Skipped: ${IMP.warn.slice(0, 6).map(esc).join(" · ")}${IMP.warn.length > 6 ? ` … and ${IMP.warn.length - 6} more` : ""}</p>` : ""}<p class="sub">Existing entries for the same student and test / date are replaced.</p><div class="row"><button class="btn" data-a="impGo" style="flex:2">Import ${IMP.n} records</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+});
+A.impGo = b => busy(b, async () => {
+  let done = 0;
+  try { for (const p of Object.keys(IMP.ops)) for (const part of chunk(IMP.ops[p], 150)) { await patch(p, part); done += part.length; b.textContent = "Importing… " + done; } }
+  catch (x) { return toast("Stopped: " + x.message + " (" + done + " changes were saved)", true); }
+  const n = IMP.n; IMP = null; closeSheet(true); toast(n + " records imported");
 });
 
 /* ===== app.js ===== */
@@ -815,11 +1299,11 @@ addEventListener("keydown", e => { if (!$("login").classList.contains("hide") &&
 async function start() {
   [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("avb").textContent = S.me.name[0].toUpperCase();
-  buildNav(); renderSide(); go("home"); flushQueue(); syncBadge();
+  buildNav(); renderSide(); go("home"); loadAssets(); flushQueue(); syncBadge();
   setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 800);   // warm up the incharge screens
 }
 function buildNav() {
-  const items = [["home", "home", "Home"], ["marks", "marks", "Test marks"], ["nb", "book", "Notebooks"]];
+  const items = [["home", "home", "Home"], ["marks", "marks", "Test marks"], ["term", "cap", "Term exams"], ["nb", "book", "Notebooks"]];
   if (inchargeClasses().length) items.push(["cls", "cls", "My class"]);
   items.push(["ins", "chart", "Insights"]); if (S.me.role === "admin") items.push(["admin", "admin", "Admin"]);
   items.push(["out", "out", "Log out"]);
@@ -844,6 +1328,7 @@ A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.data
 /* ----- profile ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
   <h3>Change PIN</h3><div class="row"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN"></div>
+  <h3 style="margin-top:18px">My signature</h3><p class="sub">Printed on report cards and mark sheets.</p><div class="sgprev">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
 A.pinSave = b => busy(b, async () => { try { await api("POST", "/pin/change", { oldPin: $("op").value, newPin: $("np").value }); closeSheet(true); toast("PIN changed"); } catch (x) { $("e2").textContent = x.message; } });
 
@@ -877,7 +1362,7 @@ function homeDraw(host) {
   const risk = st.rows.filter(r => r.risk.length), enteredToday = new Set(), month = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10), fort = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
   subs.forEach(s => Object.entries(((D[P.nb(cls, s)] || {}).entries || {})[T] || {}).forEach(([sid]) => enteredToday.add(sid)));
   const pend = st.rows.reduce((n, r) => n + (r.nbT ? r.nbInc : 0), 0), calls = inch ? risk.filter(r => !calledThisWeek(cls, r.s.id)).length : 0;
-  const fdue = inch ? fineDue(cls) : 0, fdef = inch ? all.filter(s => S.cfg.terms.some(t => feeLeft(feeRec(cls, t, s.id)) > 0)).length : 0;
+  const fdue = inch ? fineDue(cls) : 0, fdef = inch ? all.filter(s => fyDef(cls, ayStart(), s.id)).length : 0;
   const card = (tag, big, wave, pl, s1, s2) => `<div class="stat"><div class="tag">${tag}<b>${big}</b></div><div class="wave">${spark(wave)}<span class="pl">${pl}</span></div><div><small>${s1[0]}</small><strong>${s1[1]}</strong></div><div><small>${s2[0]}</small><strong>${s2[1]}</strong></div></div>`;
   const cards = card("Marks", r0(st.classAvg) + (st.classAvg == null ? "" : "%"), st.tests.map(t => t.avg).filter(x => x != null).slice(-8), r0(st.passRate) + (st.passRate == null ? "" : "% pass"), ["Tests recorded", st.tests.length], ["Students at risk", risk.length]) +
     card("Books", r0(st.nbPct) + (st.nbPct == null ? "" : "%"), [], enteredToday.size + "/" + all.length + " today", ["Chapters pending", pend], ["Subjects", subs.length]) +
@@ -917,4 +1402,3 @@ setInterval(refreshView, 25000); document.addEventListener("visibilitychange", (
 renderAcct(); drawPad(); document.querySelector(".gi").innerHTML = ic("search", 18);
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => { });
 if (token) api("GET", "/me").then(r => { S.me = r; return start(); }).catch(() => { });
-
