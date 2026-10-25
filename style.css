@@ -175,3 +175,8 @@ select{cursor:pointer}
 .rp h3{color:var(--ac);border-bottom:2px solid var(--ac);padding-bottom:3px;margin:14px 0 6px}.rp h4{margin:12px 0 4px}.rp .rps.brk+.rps.brk{break-before:page;page-break-before:always}.rp .pt{width:100%;font-size:11px}.rp .pt th,.rp .pt td{padding:4px 6px;text-align:left}.rp .mst th,.rp .mst td{text-align:center}.rp .mst td:first-child,.rp .mst th:first-child{text-align:left}.rpf{margin-top:8px}
 button.sc{border:2px solid transparent;text-align:left;font:inherit;color:inherit;cursor:pointer}button.sc.on{background:var(--card);border-color:var(--green);box-shadow:0 4px 14px #0b4a4a24}
 .nmb{font:inherit;font-weight:700;text-align:left;padding:2px 0;color:var(--deep);text-decoration:none}
+
+/* v5 */
+.mst th small,#print .pt th small{color:inherit;opacity:.88;font-weight:600}
+.prev{opacity:.62;font-size:12px;font-weight:600}
+.mcl{display:grid;gap:8px;margin:10px 0}.mcrow{display:flex;gap:8px;align-items:center}.mcrow input{flex:1;min-width:0}
