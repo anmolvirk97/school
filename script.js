@@ -65,7 +65,7 @@ async function api(method, path, body) {
   return j;
 }
 const Q = { get: () => { try { return JSON.parse(localStorage.q || "[]"); } catch { return []; } }, set: a => { localStorage.q = JSON.stringify(a); syncBadge(); } };
-function syncBadge() { const n = Q.get().length, b = $("sync"); if (b) { b.classList.toggle("hide", !n && navigator.onLine); b.textContent = n ? n + " waiting to sync" : "Offline"; } }
+function syncBadge() { const n = Q.get().length, p = pend(), b = $("sync"); if (b) { b.classList.toggle("hide", !n && !p && navigator.onLine); b.textContent = n ? n + " waiting to sync" : p ? "Saving…" : "Offline"; } }
 async function flushQueue() {
   let q = Q.get(); if (!q.length || !token) return;
   while (q.length) {
@@ -102,6 +102,32 @@ async function patch(path, ops) {                       // ops: [{k:"marks.t1.s3
   }
 }
 
+/* instant saves: the screen updates at once; a background queue sends the changes to the server in batches */
+const PQ = {}, pend = () => Object.values(PQ).reduce((n, q) => n + q.items.length + (q.busy ? 1 : 0), 0);
+function patchQ(path, ops, onFail) {
+  const old = ops.map(op => getAt(D[path] || {}, op.k.split(".")));
+  ops.forEach(op => setAt(path, op.k, op.v));
+  try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
+  (PQ[path] = PQ[path] || { items: [], busy: false }).items.push({ ops, old, onFail }); syncBadge(); pqRun(path);
+}
+async function pqRun(path) {
+  const q = PQ[path]; if (q.busy) return; q.busy = true; syncBadge();
+  try {
+    while (q.items.length) {
+      let n = 0, size = 0;
+      if (!q.items[0].solo) while (n < q.items.length && !q.items[n].solo && size + q.items[n].ops.length <= 150) size += q.items[n++].ops.length;
+      n = Math.max(n, 1); const batch = q.items.splice(0, n);
+      try { await api("POST", "/patch", { path, ops: batch.flatMap(b => b.ops) }); }
+      catch (e) {
+        if (e.offline) { batch.forEach(b => Q.set([...Q.get(), { path, ops: b.ops }])); toast("Saved on this phone. It will sync when you're back online."); continue; }
+        if (batch.length > 1) { batch.forEach(b => b.solo = true); q.items.unshift(...batch); continue; }      // find out which entry was refused
+        const b = batch[0]; b.ops.forEach((op, i) => setAt(path, op.k, b.old[i] === undefined ? null : b.old[i])); try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
+        b.onFail ? b.onFail(e) : toast("Not saved: " + e.message, true);
+      }
+    }
+  } finally { q.busy = false; syncBadge(); if (q.items.length) pqRun(path); }
+}
+addEventListener("beforeunload", e => { if (pend()) { e.preventDefault(); e.returnValue = ""; } });
 const when = t => t ? new Date(t).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
 /* Two people saved the same record: show who/what/when and let the user decide. Nothing is overwritten silently. */
 function conflictSheet(title, theirs, mine, keepAct, mineAct, extra) {
@@ -303,9 +329,12 @@ function mOpen(id) {
 }
 A.mSkip = b => { if (!closeSheet()) return; const n = entryNext("m", b.dataset.id); n ? mOpen(n.id) : 0; };
 async function mPut(id, rec) {
-  const old = mk(id);
-  try { await patch(M.path, [{ k: `marks.${M.tid}.${id}`, v: rec, base: old && old.t != null ? old.t : null }]); }
-  catch (x) { if (x.conflict) return mConflict(id, rec, x.conflict[0].current); return $("e2").textContent = x.message; }
+  const old = mk(id), path = M.path, tid = M.tid, name = stuById(id).name;
+  patchQ(path, [{ k: `marks.${tid}.${id}`, v: rec, base: old && old.t != null ? old.t : null }], e => {
+    const here = M.path === path && M.tid === tid; if (here) entryDraw("m");
+    if (here && e.conflict && e.conflict[0].current) return mConflict(id, rec, e.conflict[0].current);
+    toast(name + ": marks were not saved. " + e.message, true);
+  });
   entryDraw("m"); const n = entryNext("m", id); dirty = false; n ? mOpen(n.id) : closeSheet(true);
 }
 A.mSave = b => busy(b, async () => {
@@ -409,12 +438,27 @@ function nbDraw() {
 }
 A.nView = b => { N.view = b.dataset.v; nbDraw(); };
 function nbHeat() {
-  const last = sid => { const en = D[N.ep].entries || {}, d = Object.keys(en).filter(k => en[k][sid]).sort().pop(); return d ? en[d][sid] : null; };
-  const st = classStudents(N.cls);
-  $("nmain").innerHTML = `<div class="card"><p class="sub">Latest entry for each student. Tap a name for details.</p><div class="scroll"><table class="heat"><thead><tr><th>Student</th>${N.ch.map((c, i) => `<th title="${esc(c.n)}" class="${taught(c) ? "" : "dim"}">${i + 1}</th>`).join("")}<th>%</th></tr></thead><tbody>${st.map(s => { const e = last(s.id), t = N.ch.filter(taught).length; return `<tr><td>${esc(s.name)}</td>${N.ch.map((c, i) => `<td><i class="hc ${!e || !taught(c) ? "hn" : "s" + (e.s[i] || 0)}"></i></td>`).join("")}<td>${e && t ? Math.round(nbDone(e, N.ch) / t * 100) + "%" : "—"}</td></tr>`; }).join("")}</tbody></table></div>
+  const en = D[N.ep].entries || {}, last = sid => { const d = Object.keys(en).filter(k => en[k][sid]).sort().pop(); return d ? { d, e: en[d][sid] } : null; };
+  const st = classStudents(N.cls), t = N.ch.filter(taught).length;
+  $("nmain").innerHTML = `<div class="card"><p class="sub">Latest entry for each student. Tap a name to see, edit or delete all of their entries.</p><div class="scroll"><table class="heat"><thead><tr><th>Student</th>${N.ch.map((c, i) => `<th title="${esc(c.n)}" class="${taught(c) ? "" : "dim"}">${i + 1}</th>`).join("")}<th>%</th><th>Last</th></tr></thead><tbody>${st.map(s => { const l = last(s.id), e = l && l.e; return `<tr><td><button class="link nmb" data-a="nHist" data-id="${esc(s.id)}">${esc(s.name)}</button></td>${N.ch.map((c, i) => `<td><i class="hc ${!e || !taught(c) ? "hn" : "s" + (e.s[i] || 0)}"></i></td>`).join("")}<td>${e && t ? Math.round(nbDone(e, N.ch) / t * 100) + "%" : "—"}</td><td><small>${l ? fmtD(l.d) : "—"}</small></td></tr>`; }).join("")}</tbody></table></div>
    <p class="legend"><i class="hc s1"></i> done <i class="hc s2"></i> partial <i class="hc s0"></i> pending <i class="hc hn"></i> no entry / not taught</p>
    <p class="sub">Chapters: ${N.ch.map((c, i) => `${i + 1}. ${esc(c.n)}`).join(" · ")}</p></div>`;
 }
+/* every notebook entry of one student for this subject: open (edit) or delete */
+function nHistDraw(id) {
+  const en = D[N.ep].entries || {}, ds = Object.keys(en).filter(k => en[k][id]).sort().reverse(), t = N.ch.filter(taught).length;
+  sheetL(`<h2>${esc(stuById(id).name)} · ${esc(N.sub)}</h2><p class="sub">${ds.length ? "Tick entries to delete them, or tap Open to correct one." : "No notebook entries saved for this student."}</p>${ds.length ? `<div class="row"><button class="btn alt sm" data-a="nhAll">Select / clear all</button></div>` : ""}<div class="mlist">${ds.map(d => `<div class="lrow"><label class="cb"><input type="checkbox" class="nhc" value="${esc(d)}" aria-label="Select ${esc(fmtD(d))}"></label><div class="lm"><b>${fmtD(d)}</b><small>${nbDone(en[d][id], N.ch)}/${t} chapters done${en[d][id].by ? " · " + esc(en[d][id].by) : ""}</small></div><button class="link" data-a="nhOpen" data-id="${esc(id)}" data-d="${esc(d)}">Open</button></div>`).join("")}</div><p></p><div class="row">${ds.length ? `<button class="btn" data-a="nhDel" data-id="${esc(id)}" style="flex:2">Delete selected</button>` : ""}<button class="btn alt" data-a="close">Close</button></div>`);
+}
+A.nHist = b => nHistDraw(b.dataset.id);
+A.nhAll = () => { const cs = [...document.querySelectorAll(".nhc")], on = cs.some(c => !c.checked); cs.forEach(c => c.checked = on); };
+A.nhOpen = b => { closeSheet(true); N.date = b.dataset.d; if ($("ndate")) $("ndate").value = N.date; N.view = "entry"; nbDraw(); nOpenStu(b.dataset.id); };
+A.nhDel = b => busy(b, async () => {
+  const id = b.dataset.id, ds = [...document.querySelectorAll(".nhc:checked")].map(c => c.value); if (!ds.length) return toast("Tick at least one entry.", true);
+  if (!confirm(`Delete ${ds.length} notebook ${ds.length === 1 ? "entry" : "entries"} of ${stuById(id).name}?`)) return;
+  const en = D[N.ep].entries || {}, ops = ds.flatMap(d => [{ k: `entries.${d}.${id}`, v: null }, ...(Object.keys(en[d] || {}).every(k => k === id) ? [{ k: `entries.${d}`, v: null }] : [])]);
+  try { await patch(N.ep, ops); } catch (x) { return toast(x.message, true); }
+  toast(ds.length + " deleted"); nbDraw(); nHistDraw(id);
+});
 A.nChapters = async b => {
   if (!await nbLoad()) return;
   const row = c => `<div class="crow"><input class="cn" value="${esc(c.n)}" placeholder="Chapter name" aria-label="Chapter name"><select class="cs" aria-label="Status">${Object.entries(NBST).map(([k, v]) => `<option value="${k}" ${c.st === k ? "selected" : ""}>${v}</option>`).join("")}</select><button class="link" data-a="chDel" aria-label="Remove chapter">✕</button></div>`;
@@ -455,8 +499,12 @@ A.nsSkip = () => { if (!closeSheet()) return; const n = entryNext("n", NS.id); i
 A.nsSave = b => busy(b, async () => {
   nsKeep(); const id = NS.id, v = { s: NS.st, by: S.me.name, t: Date.now() }, old = ne(id);
   if (Object.keys(NS.cr).length) v.cr = NS.cr; if (NS.r.trim()) v.r = NS.r.trim();
-  try { await patch(N.ep, [{ k: `entries.${N.date}.${id}`, v, base: old && old.t != null ? old.t : null }]); }
-  catch (x) { if (x.conflict && x.conflict[0].current) return nConflict(id, v, x.conflict[0].current); return $("e2").textContent = x.message; }
+  const ep = N.ep, date = N.date, name = stuById(id).name;
+  patchQ(ep, [{ k: `entries.${date}.${id}`, v, base: old && old.t != null ? old.t : null }], e => {
+    const here = N.ep === ep && N.date === date; if (here) entryDraw("n");
+    if (here && e.conflict && e.conflict[0].current) return nConflict(id, v, e.conflict[0].current);
+    toast(name + ": notebook entry was not saved. " + e.message, true);
+  });
   nsDone(id);
 });
 function nsDone(id) { entryDraw("n"); dirty = false; const n = entryNext("n", id); n ? nOpenStu(n.id) : (closeSheet(true), toast("Everyone in this class is done")); }
@@ -583,6 +631,104 @@ A.tCardsGo = () => {
   const col = TCOL[o.col] || TCOL.Teal, n = [4, 6, 8].includes(o.cn) ? o.cn : 6;
   printHTML(chunk(d.rows, n).map(g => `<div class="mpg n${n}">${g.map(r => miniCard(TM.cls, TM.term, r, d, o, col)).join("")}</div>`).join(""), "@page{size:A4 portrait;margin:8mm}");
 };
+
+/* ===== reports for the principal (PDF): notebooks, marks, calls, class record, fines, attendance ===== */
+const PR = { per: "week", cls: "" };
+const ymd = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
+const dAdd = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+const fmtFull = d => d ? new Date(d + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
+const PRPER = { week: "This week", lastweek: "Last week", month: "This month", lastmonth: "Last month", range: "Date range" };
+function prRange() {
+  const t = new Date(), mon = dAdd(new Date(t.getFullYear(), t.getMonth(), t.getDate()), -((t.getDay() + 6) % 7));
+  if (PR.per === "week") return { from: ymd(mon), to: ymd(dAdd(mon, 6)), kind: "Weekly" };
+  if (PR.per === "lastweek") { const m = dAdd(mon, -7); return { from: ymd(m), to: ymd(dAdd(m, 6)), kind: "Weekly" }; }
+  if (PR.per === "month") return { from: ymd(new Date(t.getFullYear(), t.getMonth(), 1)), to: ymd(new Date(t.getFullYear(), t.getMonth() + 1, 0)), kind: "Monthly" };
+  if (PR.per === "lastmonth") return { from: ymd(new Date(t.getFullYear(), t.getMonth() - 1, 1)), to: ymd(new Date(t.getFullYear(), t.getMonth(), 0)), kind: "Monthly" };
+  const f = $("prf") && $("prf").value, e = $("prt") && $("prt").value; if (!f || !e || f > e) throw new Error("Pick a valid From and To date.");
+  return { from: f, to: e, kind: "Progress" };
+}
+function prHTML() {
+  return `<div class="card" id="prcard"><h3>Reports to submit (PDF)</h3><p class="sub">For the principal: pick the class, the period and what to include. This opens the print dialog; choose “Save as PDF”.</p>
+   <div class="form"><label>Class<select id="prc" data-c="prCls" aria-label="Class"></select></label></div>
+   <div class="seg" id="prper">${Object.entries(PRPER).map(([k, v]) => `<button data-a="prPer" data-p="${k}" class="${PR.per === k ? "on" : ""}">${v}</button>`).join("")}</div><div id="prr"></div>
+   <div class="xsets" id="prcats"></div>
+   <div class="row"><select id="pror" aria-label="Page"><option value="portrait">Portrait A4</option><option value="landscape">Landscape A4</option></select></div>
+   <label class="cb" style="margin-top:10px"><input type="checkbox" id="prbr" checked> Start each record on a new page</label>
+   <p></p><button class="btn" data-a="prGo">${ic("print", 18)} Print / save PDF</button><div class="err" id="prerr" role="alert"></div></div>`;
+}
+function prInit() {
+  const cs = myClasses(); if (!$("prc")) return; if (!cs.includes(PR.cls)) PR.cls = cs.includes(I.cls) ? I.cls : cs[0];
+  $("prc").innerHTML = cs.map(c => `<option ${c === PR.cls ? "selected" : ""}>${esc(c)}</option>`).join(""); prCats(); prRangeUI();
+}
+function prCats() {
+  const inch = inchargeClasses().includes(PR.cls), all = [["nb", "Notebook record"], ["mk", "Marks record (tests)"], ["cl", "Parent calls record", 1], ["cr", "Class record (summary per student)", 1], ["fi", "Fines & dues", 1], ["at", "Attendance", 1]];
+  $("prcats").innerHTML = all.filter(x => !x[2] || inch).map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${["nb", "mk", "cl"].includes(k) ? "checked" : ""}> ${v}</label>`).join("");
+}
+function prRangeUI() { $("prr").innerHTML = PR.per === "range" ? `<div class="row"><label class="fl">From<input id="prf" type="date" value="${today()}"></label><label class="fl">To<input id="prt" type="date" value="${today()}"></label></div>` : `<p class="sub">${esc(fmtFull(prRange().from))} – ${esc(fmtFull(prRange().to))} (weeks run Monday to Sunday)</p>`; }
+A.prCls = b => { PR.cls = b.value; prCats(); };
+A.prPer = b => { PR.per = b.dataset.p; document.querySelectorAll("#prper button").forEach(x => x.classList.toggle("on", x === b)); prRangeUI(); };
+
+A.prGo = b => busy(b, async () => {
+  $("prerr").textContent = "";
+  try {
+    const c = PR.cls, inch = inchargeClasses().includes(c), subs = subjectsOf(c), rg = prRange(), cats = [...document.querySelectorAll("#prcats input:checked")].map(i => i.value);
+    if (!cats.length) throw new Error("Tick at least one record.");
+    await load([...subs.flatMap(s => [P.marks(c, s), P.nb(c, s), P.syl(c, s)]), ...(inch ? ["fines", "calls", "fees", "attendance"].map(k => P.k(k, c)) : [])], true);
+    const inR = d => !!d && d >= rg.from && d <= rg.to, stu = classStudents(c), pass = S.cfg.passPercent, sec = [];
+    const tbl = (head, rows, cls = "") => `<table class="pt ${cls}"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}">Nothing recorded in this period.</td></tr>`}</tbody></table>`;
+    const tr = cells => `<tr>${cells.map(x => `<td>${x}</td>`).join("")}</tr>`;
+    const mkTests = sub => { const f = D[P.marks(c, sub)] || {}; return Object.entries(f.tests || {}).filter(([, t]) => inR(t.date)).sort((a, z) => a[1].date.localeCompare(z[1].date)).map(([tid, t]) => ({ tid, t, ms: getAt(f, ["marks", tid]) || {} })); };
+    const nbLatest = (sub, sid) => { const en = (D[P.nb(c, sub)] || {}).entries || {}, ds = Object.keys(en).filter(d => inR(d) && en[d][sid]).sort(); return { n: ds.length, d: ds[ds.length - 1], e: ds.length ? en[ds[ds.length - 1]][sid] : null }; };
+
+    if (cats.includes("nb")) {
+      let h = `<h3>Notebook checking record</h3>`;
+      subs.forEach(sub => {
+        const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, en = (D[P.nb(c, sub)] || {}).entries || {}, dates = Object.keys(en).filter(inR).sort();
+        h += `<h4>${esc(sub)}</h4>`; if (!tc) { h += `<p class="sub">No chapters set for this subject.</p>`; return; }
+        const rows = stu.map(s => { const l = nbLatest(sub, s.id); if (!l.e) return tr([esc(s.name), "0", "—", "—", "—", "—"]); const done = nbDone(l.e, ch), pend = ch.filter((x, i) => taught(x) && (l.e.s[i] || 0) !== 1).map(x => x.n).join(", "); return tr([esc(s.name), l.n, fmtD(l.d), `${done}/${tc}`, `<b>${Math.round(done / tc * 100)}%</b>`, esc(pend.length > 70 ? pend.slice(0, 68) + "…" : pend || "—")]); });
+        const pcts = stu.map(s => { const l = nbLatest(sub, s.id); return l.e ? nbDone(l.e, ch) / tc * 100 : null; }).filter(x => x != null);
+        h += `<p class="sub">Checked on: ${dates.length ? dates.map(fmtD).join(", ") : "no check in this period"} · class completion ${pcts.length ? Math.round(avg(pcts)) + "%" : "—"} · ${pcts.length}/${stu.length} students checked</p>` + tbl(["Student", "Checks", "Last checked", "Chapters done", "%", "Chapters pending"], rows);
+      });
+      sec.push(h);
+    }
+    if (cats.includes("mk")) {
+      let h = `<h3>Marks record</h3>`;
+      subs.forEach(sub => {
+        const ts = mkTests(sub); h += `<h4>${esc(sub)}</h4>`; if (!ts.length) { h += `<p class="sub">No test held in this period.</p>`; return; }
+        const rows = stu.map(s => { const ps = []; const cells = ts.map(x => { const e = x.ms[s.id]; if (!e) return ""; if (e.ab) return "Ab"; const p = e.m / e.max * 100; ps.push(p); return `<span class="${p < pass ? "fail" : ""}">${e.m}</span>`; }); return tr([esc(s.name), ...cells, ps.length ? `<b>${Math.round(avg(ps))}%</b>` : "—"]); });
+        const foot = `<tr class="avr"><td><b>Class average</b></td>${ts.map(x => { const v = Object.values(x.ms).filter(e => !e.ab).map(e => e.m); return `<td>${v.length ? fmt1(avg(v)) : ""}</td>`; }).join("")}<td></td></tr>`;
+        h += tbl(["Student", ...ts.map(x => `${esc(x.t.name)}<br><small>${fmtD(x.t.date)} · /${x.t.max}</small>`), "Avg %"], [...rows, foot], "mst");
+      });
+      sec.push(h);
+    }
+    if (inch && cats.includes("cl")) {
+      const cl = callsOf(c).filter(x => inR(x.date)).sort((a, z) => a.date.localeCompare(z.date)), uniq = new Set(cl.map(x => x.sid)).size, by = {}; cl.forEach(x => by[x.resp] = (by[x.resp] || 0) + 1);
+      sec.push(`<h3>Parent calls record</h3><p class="sub">${cl.length} calls · ${uniq} of ${stu.length} parents contacted (${stu.length ? Math.round(uniq / stu.length * 100) : 0}%)${Object.keys(by).length ? " · " + Object.entries(by).map(([k, v]) => `${esc(k)}: ${v}`).join(", ") : ""}</p>` + tbl(["Date", "Student", "Parent's response", "Remark", "Called by"], cl.map(x => { const s = stuById(x.sid); return tr([fmtD(x.date), esc(s ? s.name : "?"), esc(x.resp), esc(x.r || ""), esc(x.by || "")]); })));
+    }
+    if (inch && cats.includes("cr")) {
+      const months = Object.keys(FD("attendance", c)).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from), y = ayStart(rg.to), callsIn = callsOf(c).filter(x => inR(x.date));
+      const rows = stu.map(s => {
+        const pts = [], nbp = []; subs.forEach(sub => { mkTests(sub).forEach(x => { const e = x.ms[s.id]; if (e && !e.ab) pts.push(e.m / e.max * 100); }); const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, l = nbLatest(sub, s.id); if (l.e && tc) nbp.push(nbDone(l.e, ch) / tc * 100); });
+        let a = 0, lv = 0, any = false; months.forEach(m => { const r = getAt(FD("attendance", c), [m, s.id]); if (r) { any = true; a += r.a || 0; lv += r.l || 0; } });
+        const fc = fyCalc(c, y, s.id), fd = fineDue(c, s.id);
+        return { cells: [esc(s.name), pts.length, pts.length ? `<b>${Math.round(avg(pts))}%</b>` : "—", nbp.length ? Math.round(avg(nbp)) + "%" : "—", callsIn.filter(x => x.sid === s.id).length, fd ? rupee(fd) : "—", any ? `${a} / ${lv}` : "—", fc.r ? (fc.owedM > 0 ? `<span class="fail">${fyM(fc.owedM)}</span>` : "Up to date") : "—"], avg: pts.length ? avg(pts) : null };
+      });
+      const withAvg = rows.filter(r => r.avg != null);
+      sec.push(`<h3>Class record</h3><p class="sub">${stu.length} students · class average ${withAvg.length ? Math.round(avg(withAvg.map(r => r.avg))) + "%" : "—"} · pass rate ${withAvg.length ? Math.round(withAvg.filter(r => r.avg >= pass).length / withAvg.length * 100) + "%" : "—"} · ${callsIn.length} calls · fines pending ${rupee(stu.reduce((n, s) => n + fineDue(c, s.id), 0))}</p>` + tbl(["Student", "Tests", "Marks avg", "Notebook", "Calls", "Fines pending", "Absent / leave days", `Fees ${fyLab(y)}`], rows.map(r => tr(r.cells)), "mst"));
+    }
+    if (inch && cats.includes("fi")) {
+      const fr = fineRows(c).filter(x => inR(x.date)).sort((a, z) => a.date.localeCompare(z.date));
+      sec.push(`<h3>Fines & dues</h3><p class="sub">Added in this period: ${rupee(fr.reduce((n, x) => n + x.amt, 0))} · collected ${rupee(fr.filter(x => x.paid).reduce((n, x) => n + x.amt, 0))} · pending (all dates) ${rupee(stu.reduce((n, s) => n + fineDue(c, s.id), 0))}</p>` + tbl(["Date", "Student", "Type", "Amount", "Status"], fr.map(x => { const s = stuById(x.sid); return tr([fmtD(x.date), esc(s ? s.name : "?"), esc(FTYPE[x.type] || x.type), rupee(x.amt), x.paid ? "Paid" : `<span class="fail">Due</span>`]); })));
+    }
+    if (inch && cats.includes("at")) {
+      const at = FD("attendance", c), months = Object.keys(at).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from).sort();
+      sec.push(`<h3>Attendance</h3><p class="sub">Monthly totals of days absent / leaves taken.</p>` + (months.length ? tbl(["Student", ...months.map(m => `${esc(monthLabel(m))}<br><small>${at[m]._wd != null ? at[m]._wd + " working days" : ""}</small>`), "Total"], stu.map(s => { let a = 0, l = 0; const cells = months.map(m => { const r = at[m][s.id]; if (!r) return "—"; a += r.a || 0; l += r.l || 0; return `${r.a || 0} / ${r.l || 0}`; }); return tr([esc(s.name), ...cells, `<b>${a} / ${l}</b>`]); }), "mst") : `<p>No attendance entered for this period.</p>`));
+    }
+    const col = TCOL.Teal, head = `<div class="msh">${S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><div>${rg.kind} report · Class ${esc(c)}</div><small>${esc(fmtFull(rg.from))} – ${esc(fmtFull(rg.to))}</small></div></div>`;
+    const foot = `<div class="sig"><span>${S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}Prepared by ${esc(S.me.name)}</span><span>Principal</span></div><p class="sub rpf">Generated on ${esc(fmtFull(today()))}</p>`;
+    printHTML(`<div class="rp msx" style="--ac:${col}">${head}${sec.map(s => `<section class="rps${$("prbr").checked ? " brk" : ""}">${s}</section>`).join("")}${foot}</div>`, `@page{size:A4 ${$("pror").value};margin:12mm}`);
+  } catch (e) { $("prerr").textContent = e.message; }
+});
 
 /* ===== extras.js ===== */
 /* ----- school logo + teacher signature (stored on the server, cached on the device) ----- */
@@ -732,7 +878,7 @@ A.fNext = b => { if (!closeSheet()) return; const n = entryNext("f", b.dataset.i
 A.fSave = b => busy(b, async () => {
   const amt = +$("fa").value; if (!(amt > 0)) return $("e2").textContent = "Enter an amount.";
   const id = uid("f"), sid = b.dataset.id;
-  try { await patch(P.k("fines", C.cls), [{ k: "items." + id, v: { sid, type: $("ft").value, amt, date: $("fd").value, paid: 0, r: $("fr").value.trim(), by: S.me.name, t: Date.now() } }]); } catch (x) { return $("e2").textContent = x.message; }
+  const cls = C.cls; patchQ(P.k("fines", cls), [{ k: "items." + id, v: { sid, type: $("ft").value, amt, date: $("fd").value, paid: 0, r: $("fr").value.trim(), by: S.me.name, t: Date.now() } }], e => { toast("A fine was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFine($("cbody")); const n = entryNext("f", sid); n ? fOpen(n.id) : closeSheet(true); toast("Saved");
 });
 A.fPay = async b => {
@@ -760,7 +906,7 @@ function callOpen(id) {
 A.cSkip = b => { if (!closeSheet()) return; const n = entryNext("c", b.dataset.id); if (n) callOpen(n.id); };
 A.cSave = b => busy(b, async () => {
   const sid = b.dataset.id;
-  try { await patch(P.k("calls", C.cls), [{ k: "items." + uid("c"), v: { sid, date: $("cd").value, resp: $("cr").value, r: $("cn").value.trim(), by: S.me.name, t: Date.now() } }]); } catch (x) { return $("e2").textContent = x.message; }
+  const cls = C.cls; patchQ(P.k("calls", cls), [{ k: "items." + uid("c"), v: { sid, date: $("cd").value, resp: $("cr").value, r: $("cn").value.trim(), by: S.me.name, t: Date.now() } }], e => { toast("A call was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true); toast("Call logged");
 });
 
@@ -870,7 +1016,7 @@ A.fySave = b => busy(b, async () => {
   if (paid != null && (paid < 0 || (total && paid > total))) return $("e2").textContent = "Paid amount cannot be more than the total.";
   const has = Object.keys(FY.ms).length || total || paid != null;
   const v = has ? Object.assign({ months: FY.ms, by: S.me.name, t: Date.now() }, total ? { total } : {}, paid != null ? { paid } : {}) : null;
-  try { await patch(P.k("fees", C.cls), [{ k: `${fyKey(FY.y)}.${sid}`, v }]); } catch (x) { return $("e2").textContent = x.message; }
+  const cls = C.cls; patchQ(P.k("fees", cls), [{ k: `${fyKey(FY.y)}.${sid}`, v }], e => { toast("Fee entry was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFee($("cbody")); const n = entryNext("e", sid); n ? feeOpen(n.id) : closeSheet(true); toast("Saved");
 });
 A.fyClear = async () => {
@@ -896,7 +1042,7 @@ function aOpen(id) {
 }
 A.aSave = b => busy(b, async () => {
   const sid = b.dataset.id, a = +$("aa").value || 0, l = +$("al").value || 0; if (a < 0 || l < 0 || a > 31 || l > 31) return $("e2").textContent = "Enter days between 0 and 31.";
-  try { await patch(P.k("attendance", C.cls), [{ k: `${C.am}.${sid}`, v: { a, l, by: S.me.name, t: Date.now() } }]); } catch (x) { return $("e2").textContent = x.message; }
+  const cls = C.cls; patchQ(P.k("attendance", cls), [{ k: `${C.am}.${sid}`, v: { a, l, by: S.me.name, t: Date.now() } }], e => { toast("Attendance was not saved: " + e.message, true); if (C.cls === cls && $("aent")) cAtt($("cbody")); });
   dirty = false; entryDraw("a"); const n = entryNext("a", sid); n ? aOpen(n.id) : closeSheet(true);
 });
 A.aClear = async b => { try { await patch(P.k("attendance", C.cls), [{ k: `${C.am}.${b.dataset.id}`, v: null }]); } catch (x) { return toast(x.message, true); } entryDraw("a"); closeSheet(true); };
@@ -962,6 +1108,7 @@ function iOverview(host) {
    <div class="card"><h3>At-risk alerts</h3>${risk.map(r => `<div class="li"><button class="link" data-a="iStu" data-id="${esc(r.s.id)}">${esc(r.s.name)}</button><span class="risk">${r.risk.map(x => pill(x, "bad")).join(" ")}</span></div>`).join("") || `<p class="sub">No alerts right now.</p>`}</div></div>
    <div class="card"><h3>Recent tests</h3>${s.tests.slice(-8).reverse().map(t => `<div class="li"><span>${esc(t.name)} · ${esc(t.sub)} · ${fmtD(t.date)}</span><b>${t.n} entered · avg ${r0(t.avg)}%</b></div>`).join("") || `<p class="sub">No tests recorded.</p>`}</div>`;
 }
+A.iSub = b => { I.sub = I.sub === b.dataset.s ? "" : b.dataset.s; sDraw(); };
 A.iStu = b => { I.tab = "stu"; I.sid = b.dataset.id; iTab(); };
 function studentPage(sid) { const s = stuById(sid); if (!s) return; I.cls = s.cls; I.sid = sid; I.tab = "stu"; go("ins"); }
 
@@ -974,10 +1121,10 @@ function iStudent(host) {
 A.iSid = b => { I.sid = b.value; sDraw(); };
 function sDraw() {
   const s = stuById(I.sid); if (!s) return $("sbody").innerHTML = noAccess("No students in this class yet.");
-  const st = stats(I.cls), me = st.rows.find(r => r.s.id === s.id), inch = inchargeClasses().includes(I.cls), cm = {};
+  if (I.sub && !subjectsOf(I.cls).includes(I.sub)) I.sub = ""; const st = stats(I.cls), me = st.rows.find(r => r.s.id === s.id), inch = inchargeClasses().includes(I.cls), cm = {};
   subjectsOf(I.cls).forEach(sub => cm[sub] = avg(st.rows.flatMap(r => r.sub[sub] || [])));
   let h = `<div class="card shead"><div class="av">${esc(s.name[0].toUpperCase())}</div><div><h2 style="margin:0">${esc(s.name)}</h2><p class="sub" style="margin:2px 0">Class ${esc(s.cls)} · average ${r0(me.avg)}${me.avg == null ? "" : "%"} (class ${r0(st.classAvg)}${st.classAvg == null ? "" : "%"})</p>${me.risk.map(x => pill(x, "bad")).join(" ")}</div></div>
-   <div class="card"><h3>Marks trend</h3>${lineChart(me.pts.map(p => ({ x: p.sub + " " + p.x, y: p.y })), { pass: S.cfg.passPercent })}<div class="subs">${subjectsOf(I.cls).map(sub => { const v = avg(me.sub[sub] || []); return `<div class="sc"><small>${esc(sub)}</small><b style="color:${tone(v)}">${r0(v)}${v == null ? "" : "%"}</b><small>class ${r0(cm[sub])}${cm[sub] == null ? "" : "%"}</small></div>`; }).join("")}</div></div>
+   <div class="card"><div class="row between"><h3 style="margin:0">Marks trend${I.sub ? " · " + esc(I.sub) : ""}</h3>${I.sub ? `<button class="link" data-a="iSub" data-s="">All subjects</button>` : ""}</div>${lineChart((I.sub ? me.pts.filter(p => p.sub === I.sub) : me.pts).map(p => ({ x: (I.sub ? "" : p.sub + " ") + p.x, y: p.y })), { pass: S.cfg.passPercent })}<div class="subs">${subjectsOf(I.cls).map(sub => { const v = avg(me.sub[sub] || []); return `<button class="sc${I.sub === sub ? " on" : ""}" data-a="iSub" data-s="${esc(sub)}" aria-pressed="${I.sub === sub}"><small>${esc(sub)}</small><b style="color:${tone(v)}">${r0(v)}${v == null ? "" : "%"}</b><small>class ${r0(cm[sub])}${cm[sub] == null ? "" : "%"}</small></button>`; }).join("")}</div><p class="sub" style="margin-bottom:0">Tap a subject to see only its trend.</p></div>
    <div class="card"><h3>Notebooks</h3>${subjectsOf(I.cls).map(sub => { const ch = (D[P.syl(I.cls, sub)] || {}).chapters || [], en = (D[P.nb(I.cls, sub)] || {}).entries || {}, d = Object.keys(en).filter(k => en[k][s.id]).sort().pop(), e = d && en[d][s.id]; return `<div class="nbrow"><b>${esc(sub)}</b><span class="hmr">${ch.map((c, i) => `<i class="hc ${!e || !taught(c) ? "hn" : "s" + (e.s[i] || 0)}" title="${esc(c.n)}"></i>`).join("") || "<small class='sub'>No chapters set</small>"}</span><small>${e ? fmtD(d) : "no entry"}</small></div>`; }).join("")}</div>`;
   if (inch) {
     const f = fineRows(I.cls, s.id).sort((a, b) => b.date.localeCompare(a.date)), cl = callsOf(I.cls, s.id);
@@ -992,7 +1139,7 @@ function sDraw() {
 function iReports(host) {
   const inch = inchargeClasses().includes(I.cls);
   host.innerHTML = `<div class="card"><h3>Print or save as PDF</h3><p class="sub">Opens the print dialog. Choose "Save as PDF" to keep a copy.</p><div class="row"><button class="btn" data-a="repSheet">Class marks sheet</button><button class="btn" data-a="repCards">Report cards (whole class)</button>${inch ? `<button class="btn" data-a="repDef">Defaulters list</button>` : ""}</div></div>`;
-  host.insertAdjacentHTML("beforeend", exportHTML() + importHTML()); xPer(); xScopeDraw();
+  host.insertAdjacentHTML("beforeend", prHTML() + exportHTML() + importHTML()); prInit(); xPer(); xScopeDraw();
 }
 function printHTML(html, css) { $("print").innerHTML = (css ? `<style>${css}</style>` : "") + html; setTimeout(() => print(), 50); }
 const rhead = (t, logo = 1) => `<div class="rh">${logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<b>${esc(S.cfg.school)}</b><span>${esc(t)} · ${fmtD(today())}</span></div>`;
@@ -1253,7 +1400,7 @@ const chapterPairs = t => String(t ?? "").split(";").map(x => { const i = x.last
 const stCode = t => { const v = nk(t); if (["done", "complete", "completed", "full", "yes", "✔", "✓"].includes(v)) return 1; if (["partial", "half", "part", "incomplete"].includes(v)) return 2; if (["pending", "not done", "no", "", "✘", "✗", "x"].includes(v)) return 0; return null; };
 async function impPlan(wb, alias = {}, chAlias = {}) {
   const R = { ops: {}, n: 0, cnt: {}, warn: [], notes: new Set() }, note = m => R.notes.add(m), now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
-  R.undo = {}; const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (getAt(D[path] || {}, op.k.split(".")) == null) (R.undo[path] = R.undo[path] || []).push(op.k); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
+  R.undo = {}; const dupKeys = new Set(); let dups = 0; const put = (path, op, kind) => { if (kind && /^(marks|entries|Y_|\d{4}-)/.test(op.k)) { const dk = path + "|" + op.k; if (dupKeys.has(dk)) dups++; dupKeys.add(dk); } (R.ops[path] = R.ops[path] || []).push(op); if (getAt(D[path] || {}, op.k.split(".")) == null) (R.undo[path] = R.undo[path] || []).push(op.k); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
   const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; };
   const ld = async p => { if (!seen.has(p)) { seen.add(p); await load([p], true); } return D[p] || {}; };
   const stu = (c, n) => impStu(c, n, alias);
@@ -1316,7 +1463,7 @@ async function impPlan(wb, alias = {}, chAlias = {}) {
     const path = P.k("attendance", c); await ld(path); put(path, { k: `${m}.${s.id}`, v: { a: +r["Absent days"] || 0, l: +r.Leaves || 0, by, t: now } }, "Attendance");
     if (r["Working days"] !== "") put(path, { k: `${m}._wd`, v: +r["Working days"] });
   }
-  R.warn = [...bad]; R.note = [...R.notes]; R.sum = Object.entries(R.cnt); return R;
+  if (dups) note(`${dups} rows repeat the same student on the same date or test, so the last of them was used`); R.warn = [...bad]; R.note = [...R.notes]; R.sum = Object.entries(R.cnt); return R;
 }
 /* find names in the file that are not in the student list */
 function impScan(wb) {
