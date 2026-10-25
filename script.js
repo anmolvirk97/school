@@ -52,7 +52,7 @@ const stuById = id => S.students.find(s => s.id === id);
 function toast(msg, bad) {
   const t = $("toast"); t.textContent = msg; t.className = "toast" + (bad ? " bad" : ""); clearTimeout(toast.t); toast.t = setTimeout(() => t.className = "toast hide", 3200);
 }
-const busy = async (btn, fn) => { if (btn) btn.disabled = true; try { return await fn(); } finally { if (btn) btn.disabled = false; } };
+const busy = async (btn, fn) => { if (btn) { btn.disabled = true; btn.classList.add("ld"); } try { return await fn(); } finally { if (btn) { btn.disabled = false; btn.classList.remove("ld"); } } };
 
 /* ---------- API + offline queue ---------- */
 async function api(method, path, body) {
@@ -120,7 +120,7 @@ $("veil").onclick = () => closeSheet();
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").classList.contains("hide")) closeSheet(); });
 A.close = () => closeSheet();
 document.addEventListener("change", e => { const b = e.target.closest("[data-c]"); if (b && A[b.dataset.c]) A[b.dataset.c](b, e); });
-document.addEventListener("click", e => { const b = e.target.closest("[data-a]"); if (b && A[b.dataset.a]) A[b.dataset.a](b, e); });
+document.addEventListener("click", e => { const b = e.target.closest("[data-a]"); if (b && A[b.dataset.a]) { const r = A[b.dataset.a](b, e); if (r && typeof r.then === "function" && !b.classList.contains("ld")) { b.classList.add("ld"); r.then(() => b.classList.remove("ld"), () => b.classList.remove("ld")); } } });
 
 /* ---------- which class/subject pairs can this user touch? (the worker enforces the same rule) ---------- */
 function pairs() {
@@ -572,7 +572,7 @@ async function tCards(host) {
   const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { $("terr").textContent = e.message; }
 }
 function miniCard(cls, term, r, d, o, col) {
-  return `<div class="mc" style="--ac:${col}"><div class="mch">${o.clogo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><small>Report card · ${esc(term)}</small></div></div>
+  return `<div class="mcard" style="--ac:${col}"><div class="mch">${o.clogo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><small>Report card · ${esc(term)}</small></div></div>
    <div class="mcn"><b>${esc(r.s.name)}</b><span>Class ${esc(cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</span></div>
    <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.m}</td><td>${c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
    <div class="mcr">${o.crank && r.rank ? `Rank ${r.rank} ` : ""}${o.cres ? `<b class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</b>` : ""}</div>${o.cremark ? `<div class="mcl">Remarks:</div>` : ""}
@@ -648,6 +648,29 @@ A.nDelDay = b => busy(b, async () => {
   closeSheet(true); toast("Entries deleted"); nbDraw();
 });
 
+
+/* ----- dropdowns: the browser's plain popup is replaced by a menu in the app's own style ----- */
+(() => {
+  let menu = null, cur = null;
+  const close = () => { if (menu) { menu.remove(); menu = null; } if (cur) { cur.setAttribute("aria-expanded", "false"); cur = null; } };
+  const open = sel => {
+    close(); cur = sel; sel.setAttribute("aria-expanded", "true");
+    const r = sel.getBoundingClientRect(), vh = innerHeight, below = vh - r.bottom - 14, above = r.top - 14, up = below < 220 && above > below;
+    menu = document.createElement("div"); menu.className = "dd"; menu.setAttribute("role", "listbox");
+    menu.innerHTML = [...sel.options].map((o, i) => `<button type="button" role="option" class="ddo${o.selected ? " on" : ""}" data-i="${i}" ${o.disabled ? "disabled" : ""}>${esc(o.textContent)}</button>`).join("");
+    document.body.appendChild(menu);
+    const w = Math.max(r.width, 170), left = Math.max(8, Math.min(r.left, innerWidth - w - 8));
+    menu.style.cssText = `left:${left}px;min-width:${w}px;max-width:${innerWidth - 16}px;max-height:${Math.max(140, Math.min(340, up ? above : below))}px;` + (up ? `bottom:${vh - r.top + 6}px` : `top:${r.bottom + 6}px`);
+    const on = menu.querySelector(".on"); if (on) on.scrollIntoView({ block: "center" });
+    menu.onclick = e => { const b = e.target.closest(".ddo"); if (!b) return; sel.selectedIndex = +b.dataset.i; close(); sel.dispatchEvent(new Event("input", { bubbles: true })); sel.dispatchEvent(new Event("change", { bubbles: true })); };
+  };
+  const sel = e => { const s = e.target.closest && e.target.closest("select"); return s && !s.disabled && !s.multiple ? s : null; };
+  document.addEventListener("mousedown", e => { if (sel(e)) e.preventDefault(); }, true);
+  document.addEventListener("click", e => { const s = sel(e); if (!s) return; e.preventDefault(); e.stopPropagation(); cur === s ? close() : open(s); }, true);
+  document.addEventListener("keydown", e => { if (e.key === "Escape") return close(); const s = sel(e); if (s && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); open(s); } }, true);
+  document.addEventListener("pointerdown", e => { if (menu && !e.target.closest(".dd") && !sel(e)) close(); }, true);
+  addEventListener("scroll", e => { if (menu && !menu.contains(e.target)) close(); }, true); addEventListener("resize", close);
+})();
 /* ===== classwork.js ===== */
 /* ===== Class incharge area: monitors, fines & dues, parent calls, fees ===== */
 const C = { cls: "", tab: "mon", term: "" };
@@ -684,7 +707,7 @@ function monitorFor(cls, offset, ci) {
 function cMon(host) {
   const cats = S.cfg.monitorCategories, roster = classStudents(C.cls);
   if (!cats.length) return host.innerHTML = noAccess("The admin has not set any monitor categories yet.");
-  host.innerHTML = `<div class="card"><h3>This week's monitors</h3><p class="sub">Roster rotates automatically so every student gets a turn. Pick a name to override.</p>${[0, 1].map(off => `<h4>${off ? "Next week" : "This week"}</h4><div class="mons">${cats.map((c, i) => { const m = monitorFor(C.cls, off, i); return `<div class="mon"><span class="mc">${esc(c)}</span><span class="mp p${i % 3}">${m.s ? esc(m.s.name) : "—"}${m.over ? " ✎" : ""}</span><select data-c="monSet" data-cat="${esc(c)}" data-off="${off}" aria-label="Override ${esc(c)}"><option value="">Auto</option>${roster.map(s => `<option value="${esc(s.id)}" ${m.over && m.s.id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>`; }).join("")}</div>`).join("")}</div>`;
+  host.innerHTML = `<div class="card"><h3>This week's monitors</h3><p class="sub">Roster rotates automatically so every student gets a turn. Pick a name to override.</p>${[0, 1].map(off => `<h4>${off ? "Next week" : "This week"}</h4><div class="mons">${cats.map((c, i) => { const m = monitorFor(C.cls, off, i); return `<div class="mon"><span class="mcat">${esc(c)}</span><span class="mp p${i % 3}">${m.s ? esc(m.s.name) : "—"}${m.over ? " ✎" : ""}</span><select data-c="monSet" data-cat="${esc(c)}" data-off="${off}" aria-label="Override ${esc(c)}"><option value="">Auto</option>${roster.map(s => `<option value="${esc(s.id)}" ${m.over && m.s.id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>`; }).join("")}</div>`).join("")}</div>`;
 }
 A.monSet = async b => {
   const d = new Date(); d.setDate(d.getDate() + 7 * +b.dataset.off); const key = weekKey(d);
@@ -1221,72 +1244,88 @@ function importHTML() {
 let IMP = null;
 const nd = v => { if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
 const nk = n => String(n ?? "").replace(/\s+/g, " ").trim().toLowerCase();
-async function impPlan(wb, alias = {}) {
-  const R = { ops: {}, n: 0, cnt: {}, warn: [] }, now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
+const cc = v => S.cfg.classes.find(c => nk(c) === nk(v)) || String(v ?? "").replace(/\s+/g, " ").trim();
+const cs = v => S.cfg.subjects.find(c => nk(c) === nk(v)) || String(v ?? "").replace(/\s+/g, " ").trim();
+const impStu = (c, n, alias) => { const a = alias[c + "|" + nk(n)]; if (a) return a === "skip" ? undefined : stuById(a); return classStudents(c).find(s => nk(s.name) === nk(n)); };
+const whyNo = (c, sb) => !S.cfg.classes.includes(c) ? `class “${c}” does not exist` : !S.cfg.subjects.includes(sb) ? `subject “${sb}” does not exist` : `${c} ${sb}: you are not assigned to this subject`;
+const whyInch = (c, what) => !S.cfg.classes.includes(c) ? `class “${c}” does not exist` : `${c}: ${what} can be imported by the class incharge only`;
+const chapterPairs = t => String(t ?? "").split(";").map(x => { const i = x.lastIndexOf(":"); return i > 0 ? [x.slice(0, i).trim(), x.slice(i + 1).trim()] : null; }).filter(x => x && x[0]);
+const stCode = t => { const v = nk(t); if (["done", "complete", "completed", "full", "yes", "✔", "✓"].includes(v)) return 1; if (["partial", "half", "part", "incomplete"].includes(v)) return 2; if (["pending", "not done", "no", "", "✘", "✗", "x"].includes(v)) return 0; return null; };
+async function impPlan(wb, alias = {}, chAlias = {}) {
+  const R = { ops: {}, n: 0, cnt: {}, warn: [], notes: new Set() }, note = m => R.notes.add(m), now = Date.now(), by = S.me.name + " (import)", seen = new Set(), made = new Set(), bad = new Set();
   R.undo = {}; const put = (path, op, kind) => { (R.ops[path] = R.ops[path] || []).push(op); if (getAt(D[path] || {}, op.k.split(".")) == null) (R.undo[path] = R.undo[path] || []).push(op.k); if (kind) { R.cnt[kind] = (R.cnt[kind] || 0) + 1; R.n++; } };
   const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; };
   const ld = async p => { if (!seen.has(p)) { seen.add(p); await load([p], true); } return D[p] || {}; };
-  const stu = (c, n) => { const a = alias[c + "|" + nk(n)]; if (a) return a === "skip" ? undefined : stuById(a); return classStudents(c).find(s => nk(s.name) === nk(n)); };
+  const stu = (c, n) => impStu(c, n, alias);
   const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c), skip = m => bad.add(m);
   const str = v => String(v ?? "").trim();
   for (const r of rows("Test record")) {
-    const c = str(r.Class), sb = str(r.Subject), name = str(r.Test), date = nd(r.Date), rem = str(r.Remark), absent = rem.toLowerCase() === "absent", max = +r["Out of"];
-    if (!canSub(c, sb)) { skip(`${c} ${sb}: you cannot edit this subject`); continue; }
+    const c = cc(r.Class), sb = cs(r.Subject), name = str(r.Test), date = nd(r.Date), rem = str(r.Remark), absent = rem.toLowerCase() === "absent", max = +r["Out of"];
+    if (!canSub(c, sb)) { skip(whyNo(c, sb)); continue; }
     const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; }
     if (rem.toLowerCase() === "not entered" || (r.Marks === "" && !absent)) continue;
-    if (!name || !date || !(max > 0) || (!absent && !(+r.Marks >= 0 && +r.Marks <= max))) { skip(`invalid test row for ${s.name}`); continue; }
-    const path = P.marks(c, sb), f = await ld(path), term = str(r.Type) === "Term" ? S.cfg.terms.find(t => name === t + " Exam") : null; let tid, t;
+    if (!name) { skip(`a test row for ${s.name} has no test name`); continue; }
+    if (!date) { skip(`test “${name}”: unreadable date “${str(r.Date)}”`); continue; }
+    if (!(max > 0)) { skip(`test “${name}”: “Out of” is missing`); continue; }
+    if (!absent && !(+r.Marks >= 0 && +r.Marks <= max)) { skip(`${s.name} in “${name}”: marks “${str(r.Marks)}” are not between 0 and ${max}`); continue; }
+    const path = P.marks(c, sb), f = await ld(path), isT = nk(r.Type) === "term", term = isT ? S.cfg.terms.find(t => nk(name) === nk(t + " Exam") || nk(name) === nk(t)) : null; let tid, t;
+    if (isT && !term) note(`Term exam “${name}” is not in the Exam terms list, so it was imported as a normal test`);
     if (term) { tid = tTid(term); t = getAt(f, ["tests", tid]); } else { const e = Object.entries(f.tests || {}).find(([, x]) => !x.term && x.name.toLowerCase() === name.toLowerCase() && x.date === date); if (e) [tid, t] = e; else tid = slug(name) + "_" + date; }
     if (!t && !made.has(path + tid)) { made.add(path + tid); put(path, { k: "tests." + tid, v: Object.assign({ name, date, max, by }, term ? { term } : {}) }); }
     put(path, { k: `marks.${tid}.${s.id}`, v: absent ? { ab: 1, max, r: "", by, t: now } : { m: +r.Marks, max, r: rem, by, t: now } }, "Test marks");
   }
   for (const r of rows("Notebook record")) {
-    const c = str(r.Class), sb = str(r.Subject), date = nd(r.Date);
-    if (!canSub(c, sb)) { skip(`${c} ${sb}: you cannot edit this subject`); continue; }
-    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!date) { skip("notebook row without a date"); continue; }
-    const ch = (await ld(P.syl(c, sb))).chapters || []; if (!ch.length) { skip(`${c} ${sb}: set the chapters first`); continue; }
-    const mp = {}; str(r["Chapter details"]).split(";").forEach(x => { const i = x.lastIndexOf(":"); if (i > 0) mp[x.slice(0, i).trim()] = x.slice(i + 1).trim().toLowerCase(); });
-    const e = { s: ch.map(x => ({ done: 1, partial: 2 }[mp[x.n]] || 0)), by, t: now }; if (str(r.Remark)) e.r = str(r.Remark);
+    const c = cc(r.Class), sb = cs(r.Subject), date = nd(r.Date);
+    if (!canSub(c, sb)) { skip(whyNo(c, sb)); continue; }
+    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; }
+    if (!date) { skip(`notebook row for ${s.name}: unreadable date “${str(r.Date)}”`); continue; }
+    const ch = (await ld(P.syl(c, sb))).chapters || []; if (!ch.length) { skip(`${c} ${sb}: no chapters yet (Notebooks → Edit chapters)`); continue; }
+    const sc = new Array(ch.length).fill(0);
+    chapterPairs(r["Chapter details"]).forEach(([cn, st]) => {
+      const target = chAlias[`${c}|${sb}|${nk(cn)}`] ?? (ch.find(x => nk(x.n) === nk(cn)) || {}).n; if (!target || target === "skip") return;
+      const i = ch.findIndex(x => nk(x.n) === nk(target)); if (i < 0) return; const v = stCode(st); if (v == null) note(`Chapter status “${st}” is not recognised (counted as pending)`); sc[i] = v || 0;
+    });
+    const e = { s: sc, by, t: now }; if (str(r.Remark)) e.r = str(r.Remark);
     await ld(P.nb(c, sb)); put(P.nb(c, sb), { k: `entries.${date}.${s.id}`, v: e }, "Notebook entries");
   }
   for (const r of rows("Calls record")) {
-    const c = str(r.Class), date = nd(r.Date); if (!canInch(c)) { skip(`${c}: calls need the class incharge`); continue; }
-    const s = stu(c, r.Student); if (!s || !date) { skip(`call row for “${str(r.Student)}”`); continue; }
+    const c = cc(r.Class), date = nd(r.Date); if (!canInch(c)) { skip(whyInch(c, "calls")); continue; }
+    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!date) { skip(`call for ${s.name}: unreadable date “${str(r.Date)}”`); continue; }
     const path = P.k("calls", c), f = await ld(path), resp = str(r["Parent's response"]) || "Informed", rem = str(r.Remark);
     if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.resp === resp && (x.r || "") === rem)) continue;
     put(path, { k: "items." + uid("c") + R.n.toString(36), v: { sid: s.id, date, resp, r: rem, by, t: now } }, "Calls");
   }
   for (const r of rows("Fines record")) {
-    const c = str(r.Class), date = nd(r.Date), amt = +r.Amount; if (!canInch(c)) { skip(`${c}: fines need the class incharge`); continue; }
-    const s = stu(c, r.Student); if (!s || !date || !(amt > 0)) { skip(`fine row for “${str(r.Student)}”`); continue; }
-    const type = (Object.entries(FTYPE).find(([, v]) => v.toLowerCase() === str(r.Type).toLowerCase()) || ["other"])[0], path = P.k("fines", c), f = await ld(path), paid = str(r.Paid).toLowerCase() === "yes" ? 1 : 0;
+    const c = cc(r.Class), date = nd(r.Date), amt = +r.Amount; if (!canInch(c)) { skip(whyInch(c, "fines")); continue; }
+    const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!date || !(amt > 0)) { skip(`fine for ${s.name}: ${!date ? "unreadable date “" + str(r.Date) + "”" : "amount is missing"}`); continue; }
+    const ft = Object.entries(FTYPE).find(([, v]) => nk(v) === nk(r.Type)), type = ft ? ft[0] : "other"; if (!ft) note(`Fine type “${str(r.Type)}” is not recognised, so it was imported as “Other due”`); const path = P.k("fines", c), f = await ld(path), paid = str(r.Paid).toLowerCase() === "yes" ? 1 : 0;
     if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.type === type && x.amt === amt)) continue;
     const v = { sid: s.id, type, amt, date, paid, r: str(r.Remark), by, t: now }; if (paid) v.pd = nd(r["Paid on"]) || date;
     put(path, { k: "items." + uid("f") + R.n.toString(36), v }, "Fines");
   }
   for (const r of rows("Fees")) {
-    const c = str(r.Class); if (!canInch(c)) { skip(`${c}: fees need the class incharge`); continue; }
-    const s = stu(c, r.Student), y = +(/^(\d{4})/.exec(str(r.Year)) || [])[1]; if (!s || !y) { skip(`fee row for “${str(r.Student)}”`); continue; }
+    const c = cc(r.Class); if (!canInch(c)) { skip(whyInch(c, "fees")); continue; }
+    const s = stu(c, r.Student), y = +(/^(\d{4})/.exec(str(r.Year)) || [])[1]; if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!y) { skip(`fees for ${s.name}: year “${str(r.Year)}” is not like 2026-27`); continue; }
     const ms = {}; fyMonths(y).forEach(m => { const v = str(r[m.n]).toLowerCase(); if (v === "full") ms[m.k] = 2; else if (v === "half") ms[m.k] = 1; });
     const total = +r["Total fee"] || 0, paid = r.Paid === "" ? NaN : +r.Paid;
     await ld(P.k("fees", c)); put(P.k("fees", c), { k: `${fyKey(y)}.${s.id}`, v: Object.assign({ months: ms, by, t: now }, total ? { total } : {}, isNaN(paid) ? {} : { paid }) }, "Fee records");
   }
   for (const r of rows("Attendance")) {
-    const c = str(r.Class); if (!canInch(c)) { skip(`${c}: attendance needs the class incharge`); continue; }
-    const s = stu(c, r.Student), m = /^\d{4}-\d{2}$/.test(str(r.Month)) ? str(r.Month) : nd(r.Month).slice(0, 7); if (!s || !m) { skip(`attendance row for “${str(r.Student)}”`); continue; }
+    const c = cc(r.Class); if (!canInch(c)) { skip(whyInch(c, "attendance")); continue; }
+    const s = stu(c, r.Student), m = /^\d{4}-\d{2}$/.test(str(r.Month)) ? str(r.Month) : nd(r.Month).slice(0, 7); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!m) { skip(`attendance for ${s.name}: unreadable month “${str(r.Month)}”`); continue; }
     const path = P.k("attendance", c); await ld(path); put(path, { k: `${m}.${s.id}`, v: { a: +r["Absent days"] || 0, l: +r.Leaves || 0, by, t: now } }, "Attendance");
     if (r["Working days"] !== "") put(path, { k: `${m}._wd`, v: +r["Working days"] });
   }
-  R.warn = [...bad]; R.sum = Object.entries(R.cnt); return R;
+  R.warn = [...bad]; R.note = [...R.notes]; R.sum = Object.entries(R.cnt); return R;
 }
 /* find names in the file that are not in the student list */
 function impScan(wb) {
   const rows = n => { const ws = wb.Sheets[n]; return ws ? XLSX.utils.sheet_to_json(ws, { defval: "" }) : []; }, str = v => String(v ?? "").trim(), seen = {};
   const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c);
   const chk = (c, name, ok) => { if (!ok || !name || !S.cfg.classes.includes(c) || classStudents(c).some(s => nk(s.name) === nk(name))) return; (seen[c + "|" + nk(name)] = seen[c + "|" + nk(name)] || { c, name: name.replace(/\s+/g, " "), n: 0 }).n++; };
-  rows("Test record").forEach(r => { const rem = str(r.Remark).toLowerCase(); if (rem === "not entered" || (r.Marks === "" && rem !== "absent")) return; chk(str(r.Class), str(r.Student), canSub(str(r.Class), str(r.Subject))); });
-  rows("Notebook record").forEach(r => chk(str(r.Class), str(r.Student), canSub(str(r.Class), str(r.Subject))));
-  ["Calls record", "Fines record", "Fees", "Attendance"].forEach(n => rows(n).forEach(r => chk(str(r.Class), str(r.Student), canInch(str(r.Class)))));
+  rows("Test record").forEach(r => { const rem = str(r.Remark).toLowerCase(); if (rem === "not entered" || (r.Marks === "" && rem !== "absent")) return; chk(cc(r.Class), str(r.Student), canSub(cc(r.Class), cs(r.Subject))); });
+  rows("Notebook record").forEach(r => chk(cc(r.Class), str(r.Student), canSub(cc(r.Class), cs(r.Subject))));
+  ["Calls record", "Fines record", "Fees", "Attendance"].forEach(n => rows(n).forEach(r => chk(cc(r.Class), str(r.Student), canInch(cc(r.Class)))));
   return Object.values(seen);
 }
 function lev(a, b) { const m = a.length, n = b.length; if (!m || !n) return Math.max(m, n); let p = Array.from({ length: n + 1 }, (_, j) => j); for (let i = 1; i <= m; i++) { const c = [i]; for (let j = 1; j <= n; j++) c[j] = Math.min(p[j] + 1, c[j - 1] + 1, p[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); p = c; } return p[n]; }
@@ -1294,15 +1333,52 @@ const nameSim = (a, b) => { const f = (x, y) => 1 - lev(x, y) / Math.max(x.lengt
 const upsertStu = r => { const i = S.students.findIndex(x => x.id === r.id); i < 0 ? S.students.push(r) : S.students[i] = r; };
 let IM = null;
 A.impRead = b => busy(b, async () => {
-  $("ierr").textContent = ""; const f = $("xfile").files[0]; if (!f) return $("ierr").textContent = "Choose an Excel file first.";
+  $("ierr").textContent = ""; const f = $("xfile").files[0]; if (!f) return $("ierr").textContent = "Choose an Excel file first."; IM = null;
   try {
     await loadXlsx(); const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), un = impScan(wb), inch = inchargeClasses();
     if (un.length) {
       IM = { wb, list: un.map(u => { const k = nk(u.name), cands = classStudents(u.c).map(s => ({ id: s.id, name: s.name, sc: nameSim(k, nk(s.name)) })).sort((x, y) => y.sc - x.sc).slice(0, 12), best = cands[0], canNew = inch.includes(u.c); cands.forEach(c => c.best = c === best && c.sc >= .6); return Object.assign(u, { cands, canNew, sel: best && best.sc >= .85 ? best.id : canNew ? "new" : "skip" }); }) };
       return impMatchDraw();
     }
-    await impFinish(wb, {}, []);
+    await impChapters(wb, {}, []);
   } catch (e) { $("ierr").textContent = e.message || "Could not read this file."; }
+});
+/* chapter names in the notebook sheet that the subject does not have yet */
+async function impScanCh(wb, alias) {
+  const ws = wb.Sheets["Notebook record"]; if (!ws) return [];
+  const out = {}, loaded = new Set(); let ord = 0;
+  for (const r of XLSX.utils.sheet_to_json(ws, { defval: "" })) {
+    const c = cc(r.Class), sb = cs(r.Subject); if (!S.cfg.classes.includes(c) || !pairs().some(p => p.cls === c && p.sub === sb) || !impStu(c, String(r.Student ?? ""), alias)) continue;
+    const path = P.syl(c, sb); if (!loaded.has(path)) { loaded.add(path); await load([path], true); }
+    const ch = (D[path] || {}).chapters || [];
+    chapterPairs(r["Chapter details"]).forEach(([cn]) => { if (ch.some(x => nk(x.n) === nk(cn))) return; const k = `${c}|${sb}|${nk(cn)}`; if (!out[k]) { const cands = ch.map(x => ({ n: x.n, sc: nameSim(nk(cn), nk(x.n)) })).sort((x, y) => y.sc - x.sc).slice(0, 12); cands.forEach((q, i) => q.best = i === 0 && q.sc >= .6); out[k] = { key: k, c, sb, name: cn, n: 0, ord: ++ord, cands, sel: cands[0] && cands[0].sc >= .85 ? cands[0].n : "new" }; } out[k].n++; });
+  }
+  return Object.values(out).sort((x, y) => x.ord - y.ord);
+}
+async function impChapters(wb, alias, created) {
+  const chl = await impScanCh(wb, alias); IM = Object.assign({}, IM, { wb, alias, created, chl });
+  if (chl.length) return impChDraw();
+  await impFinish(wb, alias, created, {}, 0);
+}
+function impChDraw() {
+  const L = IM.chl;
+  sheetL(`<h2>Chapters not found</h2><p class="sub">${L.length} chapter ${L.length === 1 ? "name" : "names"} in the notebook sheet ${L.length === 1 ? "is" : "are"} not in that subject's chapter list. For each, pick the chapter it matches (name difference), add it as a new chapter at the end of the list, or ignore it.</p><div class="row"><button class="btn alt sm" data-a="imChAll" data-v="new">Add all as new</button><button class="btn alt sm" data-a="imChAll" data-v="skip">Ignore all</button></div>
+   <div class="mlist">${L.map((r, i) => `<div class="mrow"><div><b>${esc(r.name)}</b><br><small>${esc(r.c)} · ${esc(r.sb)} · ${r.n} ${r.n === 1 ? "entry" : "entries"}</small></div><select data-c="imChSel" data-i="${i}" aria-label="Match ${esc(r.name)}"><option value="new" ${r.sel === "new" ? "selected" : ""}>Add as new chapter</option><option value="skip" ${r.sel === "skip" ? "selected" : ""}>Ignore this chapter</option>${r.cands.map(c => `<option value="${esc(c.n)}" ${r.sel === c.n ? "selected" : ""}>= ${esc(c.n)}${c.best ? " (closest)" : ""}</option>`).join("")}</select></div>`).join("")}</div>
+   <p class="sub">New chapters are added to the end of the subject's list (as “Full”), so existing ticks stay in place.</p><div class="row"><button class="btn" data-a="imChGo" style="flex:2">Continue</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+}
+A.imChSel = b => { IM.chl[+b.dataset.i].sel = b.value; };
+A.imChAll = b => { IM.chl.forEach(r => r.sel = b.dataset.v); impChDraw(); };
+A.imChGo = b => busy(b, async () => {
+  const chAlias = {}, add = {}; let added = 0;
+  IM.chl.forEach(r => { if (r.sel === "skip") chAlias[r.key] = "skip"; else if (r.sel === "new") { (add[`${r.c}|${r.sb}`] = add[`${r.c}|${r.sb}`] || []).push(r); chAlias[r.key] = r.name; } else chAlias[r.key] = r.sel; });
+  try {
+    for (const [k, rs] of Object.entries(add)) {
+      const [c, sb] = k.split("|"), path = P.syl(c, sb); await load([path], true); const list = [...((D[path] || {}).chapters || [])];
+      rs.forEach(r => { if (!list.some(x => nk(x.n) === nk(r.name))) { list.push({ n: r.name, st: "full" }); added++; } });
+      await patch(path, [{ k: "chapters", v: list }]);
+    }
+    await impFinish(IM.wb, IM.alias, IM.created, chAlias, added);
+  } catch (x) { toast(x.message, true); }
 });
 function impMatchDraw() {
   sheetL(`<h2>Students not found</h2><p class="sub">${IM.list.length} ${IM.list.length === 1 ? "name" : "names"} in the file ${IM.list.length === 1 ? "is" : "are"} not in the student list. For each one, create a new student, choose the existing student it really is (spelling difference), or skip its rows.</p><div class="row"><button class="btn alt sm" data-a="imAll" data-v="new">Create all as new</button><button class="btn alt sm" data-a="imAll" data-v="skip">Skip all</button></div>
@@ -1316,17 +1392,17 @@ A.imMatchGo = b => busy(b, async () => {
   IM.list.forEach(r => { const k = r.c + "|" + nk(r.name); if (r.sel === "skip") alias[k] = "skip"; else if (r.sel === "new") (byCls[r.c] = byCls[r.c] || []).push(r); else alias[k] = r.sel; });
   try {
     for (const [c, rs] of Object.entries(byCls)) { const res = await api("POST", "/students/add", { students: rs.map(r => ({ name: r.name, cls: c })) }); res.students.forEach((st, i) => { upsertStu(st); alias[c + "|" + nk(rs[i].name)] = st.id; if (res.created.includes(st.id)) created.push(st.id); }); }
-    await impFinish(IM.wb, alias, created);
+    await impChapters(IM.wb, alias, created);
   } catch (x) { toast(x.message, true); }
 });
-async function impFinish(wb, alias, created) {
-  IMP = await impPlan(wb, alias); IMP.stu = created;
+async function impFinish(wb, alias, created, chAlias = {}, newCh = 0) {
+  IMP = await impPlan(wb, alias, chAlias); IMP.stu = created;
   if (!IMP.n) { if (!$("ierr")) closeSheet(true); const m = "Nothing to import. " + (IMP.warn.slice(0, 3).join(" · ") || "No sheets in the expected format were found."); if ($("ierr")) $("ierr").textContent = m; throw new Error(m); }
-  sheetL(`<h2>Ready to import</h2><div class="hist">${created.length ? `<div class="hr"><span>New students created</span><b>${created.length}</b></div>` : ""}${IMP.sum.map(x => `<div class="hr"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join("")}</div>${IMP.warn.length ? `<p class="sub">Skipped: ${IMP.warn.slice(0, 6).map(esc).join(" · ")}${IMP.warn.length > 6 ? ` … and ${IMP.warn.length - 6} more` : ""}</p>` : ""}<p class="sub">Existing entries for the same student and test / date are replaced.</p><div class="row"><button class="btn" data-a="impGo" style="flex:2">Import ${IMP.n} records</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+  sheetL(`<h2>Ready to import</h2><div class="hist">${created.length ? `<div class="hr"><span>New students created</span><b>${created.length}</b></div>` : ""}${newCh ? `<div class="hr"><span>New chapters added</span><b>${newCh}</b></div>` : ""}${IMP.sum.map(x => `<div class="hr"><span>${esc(x[0])}</span><b>${x[1]}</b></div>`).join("")}</div>${IMP.warn.length ? `<p class="sub">Skipped: ${IMP.warn.slice(0, 6).map(esc).join(" · ")}${IMP.warn.length > 6 ? ` … and ${IMP.warn.length - 6} more` : ""}</p>` : ""}${IMP.note.length ? `<p class="sub">Notes: ${IMP.note.map(esc).join(" · ")}</p>` : ""}<p class="sub">Existing entries for the same student and test / date are replaced.</p><div class="row"><button class="btn" data-a="impGo" style="flex:2">Import ${IMP.n} records</button><button class="btn alt" data-a="close">Cancel</button></div>`);
 }
 A.impGo = b => busy(b, async () => {
   let done = 0;
-  try { for (const p of Object.keys(IMP.ops)) for (const part of chunk(IMP.ops[p], 150)) { await patch(p, part); done += part.length; b.textContent = "Importing… " + done; } }
+  try { for (const p of Object.keys(IMP.ops)) for (const part of chunk(IMP.ops[p], 150)) { await patch(p, part); done += part.length; } }
   catch (x) { return toast("Stopped: " + x.message + " (" + done + " changes were saved)", true); }
   const n = IMP.n; impLogPush({ t: Date.now(), n, undo: IMP.undo, stu: IMP.stu || [] }); IMP = null; closeSheet(true); toast(n + " records imported"); if ($("impu")) $("impu").innerHTML = impUndoHTML();
 });
