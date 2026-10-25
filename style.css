@@ -167,3 +167,11 @@ select{cursor:pointer}
 .ddo{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;text-align:left;font:inherit;font-weight:700;color:var(--ink);background:none;border:0;border-radius:16px;padding:12px 14px;min-height:46px;cursor:pointer}
 .ddo:hover,.ddo:focus-visible{background:var(--bg);outline:none}.ddo.on{background:var(--lime);color:#0b3d3d}.ddo.on::after{content:"✓";font-weight:800}.ddo:disabled{opacity:.4}
 @media(prefers-reduced-motion:reduce){.dd,.ld::after{animation-duration:1.5s}}
+
+/* v4: PDFs keep their colours; student trend buttons; heatmap names; principal report */
+#print,#print *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+#print .pt th{background:#0b4a4a;color:#fff}#print .mst th{background:var(--ac)}#print .pt tbody tr:nth-child(even) td{background:#f1f6f5}#print .mst .avr td{background:#e3ecea}
+#print thead{display:table-header-group}#print tr{break-inside:avoid}
+.rp h3{color:var(--ac);border-bottom:2px solid var(--ac);padding-bottom:3px;margin:14px 0 6px}.rp h4{margin:12px 0 4px}.rp .rps.brk+.rps.brk{break-before:page;page-break-before:always}.rp .pt{width:100%;font-size:11px}.rp .pt th,.rp .pt td{padding:4px 6px;text-align:left}.rp .mst th,.rp .mst td{text-align:center}.rp .mst td:first-child,.rp .mst th:first-child{text-align:left}.rpf{margin-top:8px}
+button.sc{border:2px solid transparent;text-align:left;font:inherit;color:inherit;cursor:pointer}button.sc.on{background:var(--card);border-color:var(--green);box-shadow:0 4px 14px #0b4a4a24}
+.nmb{font:inherit;font-weight:700;text-align:left;padding:2px 0;color:var(--deep);text-decoration:none}
