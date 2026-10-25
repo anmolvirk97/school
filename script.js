@@ -78,7 +78,7 @@ addEventListener("online", () => { syncBadge(); flushQueue(); }); addEventListen
 
 /* ---------- data files: cached, offline-aware, edited with safe patches ---------- */
 async function load(paths, force) {
-  const need = paths.filter(p => force || !(p in D));
+  const need = paths.filter(p => (force || !(p in D)) && !(typeof PQ !== "undefined" && PQ[p] && (PQ[p].busy || PQ[p].items.length)));
   if (need.length) {
     try { const r = await api("POST", "/bulk", { paths: need }); need.forEach(p => { D[p] = r[p] || {}; try { localStorage["c_" + p] = JSON.stringify(D[p]); } catch { } }); }
     catch (e) { if (!e.offline) throw e; need.forEach(p => { try { D[p] = JSON.parse(localStorage["c_" + p]); } catch { D[p] = {}; } }); toast("Offline - showing the last saved copy"); }
@@ -122,10 +122,16 @@ async function pqRun(path) {
         if (e.offline) { batch.forEach(b => Q.set([...Q.get(), { path, ops: b.ops }])); toast("Saved on this phone. It will sync when you're back online."); continue; }
         if (batch.length > 1) { batch.forEach(b => b.solo = true); q.items.unshift(...batch); continue; }      // find out which entry was refused
         const b = batch[0]; b.ops.forEach((op, i) => setAt(path, op.k, b.old[i] === undefined ? null : b.old[i])); try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
-        b.onFail ? b.onFail(e) : toast("Not saved: " + e.message, true);
+        b.onFail ? b.onFail(e) : (toast("Not saved: " + e.message, true), redrawNow());
       }
     }
   } finally { q.busy = false; syncBadge(); if (q.items.length) pqRun(path); }
+}
+function patchQAll(path, ops, onFail) { chunk(ops, 150).forEach(part => patchQ(path, part, onFail)); }
+function redrawNow() {
+  try {
+    if (cur === "marks" && $("m-ls")) entryDraw("m"); else if (cur === "nb" && $("nbody")) nbDraw(); else if (cur === "cls" && $("cbody")) cTab(); else if (cur === "ins" && $("ibody")) iTab();
+  } catch { }
 }
 addEventListener("beforeunload", e => { if (pend()) { e.preventDefault(); e.returnValue = ""; } });
 const when = t => t ? new Date(t).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
@@ -227,7 +233,7 @@ async function bundleFast(cls, render, quiet) {
 }
 /* keep the keyboard from covering the entry card (phones/tablets) */
 if (window.visualViewport) {
-  const vv = visualViewport, fit = () => { const s = $("sheet"); if (!s) return; s.style.bottom = Math.max(0, innerHeight - vv.height - vv.offsetTop) + "px"; s.style.maxHeight = Math.max(260, vv.height - 20) + "px"; };
+  const vv = visualViewport, fit = () => { const s = $("sheet"); if (!s) return; const kb = Math.max(0, innerHeight - vv.height - vv.offsetTop); s.style.bottom = kb > 80 ? kb + 8 + "px" : ""; s.style.maxHeight = kb > 80 ? Math.max(260, vv.height - 20) + "px" : ""; };
   vv.addEventListener("resize", fit); vv.addEventListener("scroll", fit);
 }
 document.addEventListener("focusin", e => { if (e.target.closest("#sheet")) setTimeout(() => e.target.scrollIntoView({ block: "nearest", behavior: "smooth" }), 320); });
@@ -306,12 +312,12 @@ A.mStart = b => busy(b, async () => {
   if (!name || !(max > 0) || !date) return toast("Add a test name, max marks and date.", true);
   const path = P.marks(c, s); await load([path], true);
   const same = Object.entries(D[path].tests || {}).find(([, t]) => !t.term && t.name.toLowerCase() === name.toLowerCase() && t.date === date), tid = same ? same[0] : slug(name) + "_" + date;
-  if (!same) { try { await patch(path, [{ k: "tests." + tid, v: { name, date, max, by: S.me.name } }]); } catch (x) { return toast(x.message, true); } }
-  await mRun($("mentry"), c, s, tid); mHist();
+  if (!same) patchQ(path, [{ k: "tests." + tid, v: { name, date, max, by: S.me.name } }], e => { toast("The test was not saved: " + e.message, true); if (M.tid === tid) { $("mentry").innerHTML = ""; M = {}; } mHist(); });
+  await mRun($("mentry"), c, s, tid, false, true); mHist();
 });
 /* open the name list for one test (used by unit tests and term exams) */
-async function mRun(host, c, s, tid, quiet) {
-  const path = P.marks(c, s); await load([path], true);
+async function mRun(host, c, s, tid, quiet, local) {
+  const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
   M = { path, cls: c, sub: s, tid, max: t.max };
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · out of ${t.max} · ${fmtD(t.date)}`,
@@ -343,19 +349,19 @@ A.mSave = b => busy(b, async () => {
   return mPut(id, { m: +v, max: mx, r: $("mr").value.trim(), by: S.me.name, t: Date.now() });
 });
 A.mAbsOne = b => busy(b, () => mPut(b.dataset.id, { ab: 1, max: +$("mx").value || M.max, r: $("mr").value.trim(), by: S.me.name, t: Date.now() }));
-A.mDelOne = b => busy(b, async () => {
+A.mDelOne = b => {
   if (!confirm("Delete this student's entry for the test?")) return;
-  try { await patch(M.path, [{ k: `marks.${M.tid}.${b.dataset.id}`, v: null }]); } catch (x) { return $("e2").textContent = x.message; }
+  patchQ(M.path, [{ k: `marks.${M.tid}.${b.dataset.id}`, v: null }], e => { toast("Not deleted: " + e.message, true); if ($("m-ls")) entryDraw("m"); });
   entryDraw("m"); closeSheet(true); toast("Entry deleted");
-});
+};
 /* everyone without an entry = absent / did not give the test */
-A.mAbs = b => busy(b, async () => {
+A.mAbs = b => {
   const rest = classStudents(M.cls).filter(s => !mk(s.id)); if (!rest.length) return toast("Everyone already has an entry.");
   if (!confirm(`Mark the ${rest.length} students without marks as absent (did not give this test)?`)) return;
   const ops = rest.map(s => ({ k: `marks.${M.tid}.${s.id}`, v: { ab: 1, max: M.max, r: "", by: S.me.name, t: Date.now() } }));
-  try { for (const part of chunk(ops, 150)) await patch(M.path, part); } catch (x) { return toast(x.message, true); }
+  patchQAll(M.path, ops, e => { toast("Not saved: " + e.message, true); if ($("m-ls")) entryDraw("m"); });
   entryDraw("m"); toast(rest.length + " marked absent");
-});
+};
 /* list of saved entries: edit one, delete several */
 A.mManage = () => {
   const rows = classStudents(M.cls).filter(s => mk(s.id)); if (!rows.length) return toast("No entries saved yet.", true);
@@ -363,19 +369,19 @@ A.mManage = () => {
 };
 A.mkAll = () => { const cs = [...document.querySelectorAll(".mkc")], on = cs.some(c => !c.checked); cs.forEach(c => c.checked = on); };
 A.mkEdit = b => mOpen(b.dataset.id);
-A.mkDel = b => busy(b, async () => {
+A.mkDel = b => {
   const ids = [...document.querySelectorAll(".mkc:checked")].map(c => c.value); if (!ids.length) return toast("Tick at least one entry.", true);
   if (!confirm(`Delete ${ids.length} saved ${ids.length === 1 ? "entry" : "entries"}?`)) return;
-  try { for (const part of chunk(ids.map(id => ({ k: `marks.${M.tid}.${id}`, v: null })), 150)) await patch(M.path, part); } catch (x) { return toast(x.message, true); }
+  patchQAll(M.path, ids.map(id => ({ k: `marks.${M.tid}.${id}`, v: null })), e => { toast("Not deleted: " + e.message, true); if ($("m-ls")) entryDraw("m"); });
   entryDraw("m"); closeSheet(true); toast(ids.length + " deleted");
-});
+};
 /* edit the test itself: name, date, max marks */
 let ET = {};
 A.mEditT = b => {
   const path = P.marks($("mc").value, $("ms").value), t = D[path].tests[b.dataset.t]; ET = { path, tid: b.dataset.t, t };
   sheet(`<h2>Edit test</h2><div class="form"><label>Test name<input id="etn" value="${esc(t.name)}"></label><label>Date<input id="etd" type="date" value="${esc(t.date)}"></label><label>Max marks<input id="etm" type="number" inputmode="decimal" value="${t.max}"></label><label class="cb"><input type="checkbox" id="etu" checked> Also change “out of” on marks already entered</label></div><p></p><div class="row"><button class="btn" data-a="mEditSave" style="flex:2">Save changes</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
 };
-A.mEditSave = b => busy(b, async () => {
+A.mEditSave = b => {
   const { path, tid, t } = ET, name = $("etn").value.trim(), date = $("etd").value, max = +$("etm").value;
   if (!name || !date || !(max > 0)) return $("e2").textContent = "Fill in the name, date and max marks.";
   const ms = (D[path].marks || {})[tid] || {}, ops = [{ k: "tests." + tid, v: Object.assign({}, t, { name, date, max }) }];
@@ -383,16 +389,16 @@ A.mEditSave = b => busy(b, async () => {
     const over = Object.values(ms).filter(e => !e.ab && e.m > max).length; if (over) return $("e2").textContent = over + " saved marks are higher than " + max + ". Correct them first.";
     Object.entries(ms).forEach(([sid, e]) => { if (e.max === t.max) ops.push({ k: `marks.${tid}.${sid}`, v: Object.assign({}, e, { max }) }); });
   }
-  try { for (const part of chunk(ops, 150)) await patch(path, part); } catch (x) { return $("e2").textContent = x.message; }
+  patchQAll(path, ops, e => { toast("Test not updated: " + e.message, true); mHist(); });
   closeSheet(true); toast("Test updated"); mHist();
-  if (M.tid === tid && M.path === path) mRun($("mentry"), M.cls, M.sub, tid, true);
-});
+  if (M.tid === tid && M.path === path) mRun($("mentry"), M.cls, M.sub, tid, true, true);
+};
 /* delete a whole test with all its marks */
-A.mDelT = async b => {
+A.mDelT = b => {
   const c = $("mc").value, s = $("ms").value, path = P.marks(c, s), tid = b.dataset.t, t = D[path].tests[tid], ids = Object.keys((D[path].marks || {})[tid] || {});
   if (!confirm(`Delete the test “${t.name}” (${fmtD(t.date)}) and its ${ids.length} saved marks? This cannot be undone.`)) return;
   const ops = [...ids.map(id => ({ k: `marks.${tid}.${id}`, v: null })), { k: `marks.${tid}`, v: null }, { k: "tests." + tid, v: null }];
-  try { for (const part of chunk(ops, 150)) await patch(path, part); } catch (x) { return toast(x.message, true); }
+  patchQAll(path, ops, e => { toast("Test not deleted: " + e.message, true); mHist(); });
   if (M.tid === tid && M.path === path) { $("mentry").innerHTML = ""; M = {}; }
   toast("Test deleted"); mHist();
 };
@@ -431,10 +437,16 @@ async function nbLoad() {
   const [sy] = await load([N.sp, N.ep], true); N.ch = sy.chapters || []; return true;
 }
 A.nOpen = b => busy(b, async () => { if (!await nbLoad()) return; if (!N.ch.length) return A.nChapters(b); nbDraw(); });
+const nPrev = sid => { const en = (D[N.ep] || {}).entries || {}, d = Object.keys(en).filter(k => k < N.date && en[k][sid]).sort().pop(); return d ? { d, e: en[d][sid] } : null; };
+function nDates() {
+  const en = (D[N.ep] || {}).entries || {}, ds = Object.keys(en).filter(k => Object.keys(en[k] || {}).length).sort().reverse().slice(0, 6); if (!ds.length) return "";
+  return `<div class="row chips"><small class="sub">Dates with entries:</small>${ds.map(d => `<button class="chip${d === N.date ? " on" : ""}" data-a="nDate" data-d="${esc(d)}">${esc(fmtD(d))}</button>`).join("")}</div>`;
+}
+A.nDate = b => { N.date = b.dataset.d; if ($("ndate")) $("ndate").value = N.date; nbDraw(); };
 function nbDraw() {
   $("nbody").innerHTML = `<div class="seg" role="tablist"><button class="${N.view === "entry" ? "on" : ""}" data-a="nView" data-v="entry">Enter</button><button class="${N.view === "heat" ? "on" : ""}" data-a="nView" data-v="heat">Heatmap</button></div><div id="nmain"></div>`;
   if (N.view === "heat") return nbHeat();
-  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)} · ${N.ch.filter(taught).length} chapters being checked`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id); return e ? nbDone(e, N.ch) + "/" + N.ch.filter(taught).length : ""; }, tools: `<button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
+  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)} · ${N.ch.filter(taught).length} chapters being checked${nDates()}`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id), t = N.ch.filter(taught).length; if (e) return nbDone(e, N.ch) + "/" + t; const p = nPrev(s.id); return p ? `<span class="prev">last ${esc(fmtD(p.d))} · ${nbDone(p.e, N.ch)}/${t}</span>` : ""; }, tools: `<button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
 }
 A.nView = b => { N.view = b.dataset.v; nbDraw(); };
 function nbHeat() {
@@ -452,13 +464,13 @@ function nHistDraw(id) {
 A.nHist = b => nHistDraw(b.dataset.id);
 A.nhAll = () => { const cs = [...document.querySelectorAll(".nhc")], on = cs.some(c => !c.checked); cs.forEach(c => c.checked = on); };
 A.nhOpen = b => { closeSheet(true); N.date = b.dataset.d; if ($("ndate")) $("ndate").value = N.date; N.view = "entry"; nbDraw(); nOpenStu(b.dataset.id); };
-A.nhDel = b => busy(b, async () => {
+A.nhDel = b => {
   const id = b.dataset.id, ds = [...document.querySelectorAll(".nhc:checked")].map(c => c.value); if (!ds.length) return toast("Tick at least one entry.", true);
   if (!confirm(`Delete ${ds.length} notebook ${ds.length === 1 ? "entry" : "entries"} of ${stuById(id).name}?`)) return;
   const en = D[N.ep].entries || {}, ops = ds.flatMap(d => [{ k: `entries.${d}.${id}`, v: null }, ...(Object.keys(en[d] || {}).every(k => k === id) ? [{ k: `entries.${d}`, v: null }] : [])]);
-  try { await patch(N.ep, ops); } catch (x) { return toast(x.message, true); }
+  patchQAll(N.ep, ops, e => { toast("Not deleted: " + e.message, true); nbDraw(); });
   toast(ds.length + " deleted"); nbDraw(); nHistDraw(id);
-});
+};
 A.nChapters = async b => {
   if (!await nbLoad()) return;
   const row = c => `<div class="crow"><input class="cn" value="${esc(c.n)}" placeholder="Chapter name" aria-label="Chapter name"><select class="cs" aria-label="Status">${Object.entries(NBST).map(([k, v]) => `<option value="${k}" ${c.st === k ? "selected" : ""}>${v}</option>`).join("")}</select><button class="link" data-a="chDel" aria-label="Remove chapter">✕</button></div>`;
@@ -471,7 +483,7 @@ A.chDel = b => { b.closest(".crow").remove(); dirty = true; };
 A.chSave = b => busy(b, async () => {
   const ch = [...document.querySelectorAll("#chl .crow")].map(r => ({ n: r.querySelector(".cn").value.trim(), st: r.querySelector(".cs").value })).filter(c => c.n);
   if (!ch.length) return $("e2").textContent = "Add at least one chapter.";
-  try { await patch(N.sp, [{ k: "chapters", v: ch }]); } catch (x) { return $("e2").textContent = x.message; }
+  patchQ(N.sp, [{ k: "chapters", v: ch }], e => { toast("Chapters were not saved: " + e.message, true); });
   N.ch = ch; closeSheet(true); toast("Chapters saved"); nbDraw();
 });
 function nOpenStu(id) {
@@ -480,7 +492,7 @@ function nOpenStu(id) {
 }
 function nsDraw() {
   const s = stuById(NS.id), t = N.ch.map((c, i) => c).filter(taught).length;
-  $("sheet").innerHTML = `<div class="row between"><h2>${esc(s.name)}</h2><button class="link" data-a="nsMode">${NS.detail ? "Quick strip" : "Individual entry"}</button></div><p class="sub">${fmtD(N.date)} · ${esc(N.sub)} · ${NS.detail ? "Set each chapter and add remarks" : "Tap a chapter to cycle done → partial → pending"}</p>` +
+  $("sheet").innerHTML = `<div class="row between"><h2>${esc(s.name)}</h2><button class="link" data-a="nsMode">${NS.detail ? "Quick strip" : "Individual entry"}</button></div><p class="sub">${fmtD(N.date)} · ${esc(N.sub)} · ${NS.detail ? "Set each chapter and add remarks" : "Tap a chapter to cycle done → partial → pending"}</p>${(() => { const p = ne(NS.id) ? null : nPrev(NS.id); return p ? `<p class="sub">Last checked ${esc(fmtD(p.d))}: ${nbDone(p.e, N.ch)}/${N.ch.filter(taught).length} chapters done. Use “Same as last entry” to start from it.</p>` : ""; })()}` +
     (NS.detail ? `<div class="chl">${N.ch.map((c, i) => `<div class="crow ${taught(c) ? "" : "dim"}"><span class="cl">${i + 1}. ${esc(c.n)}</span><select data-c="nsSel" data-i="${i}" ${taught(c) ? "" : "disabled"} aria-label="Chapter ${i + 1} status"><option value="1" ${NS.st[i] === 1 ? "selected" : ""}>Done</option><option value="2" ${NS.st[i] === 2 ? "selected" : ""}>Partial</option><option value="0" ${NS.st[i] === 0 ? "selected" : ""}>Pending</option></select><input class="cr" data-i="${i}" placeholder="Remark" value="${esc(NS.cr[i] || "")}" ${taught(c) ? "" : "disabled"}></div>`).join("")}</div><p><input id="nr" placeholder="Overall remark (optional)" value="${esc(NS.r)}" style="width:100%"></p>`
       : `<div class="chs">${N.ch.map((c, i) => `<button class="ch s${NS.st[i]}" data-a="nbCh" data-i="${i}" title="${esc(c.n)}" ${taught(c) ? "" : "disabled"}>Ch ${i + 1}<br>${taught(c) ? SYM[NS.st[i]] : "–"}</button>`).join("")}</div><p class="sub chnames">${N.ch.map((c, i) => `${i + 1}. ${esc(c.n)}`).join(" · ")}</p>`) +
     `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div><p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div>${ne(NS.id) ? `<p></p><button class="btn alt sm" data-a="nsDel">Delete this entry</button>` : ""}<div class="err" id="e2"></div>`;
@@ -569,9 +581,9 @@ A.tStart = b => busy(b, async () => {
   const t = getAt(D[path], ["tests", tid]);
   if (!t || t.max !== max || t.date !== date) {
     if (t && t.max !== max && Object.keys(getAt(D[path], ["marks", tid]) || {}).length && !confirm("Marks are already entered out of " + t.max + ". Change this exam to " + max + "?")) return;
-    try { await patch(path, [{ k: "tests." + tid, v: { name: TM.term + " Exam", date, max, term: TM.term, by: (t && t.by) || S.me.name } }]); } catch (x) { return toast(x.message, true); }
+    patchQ(path, [{ k: "tests." + tid, v: { name: TM.term + " Exam", date, max, term: TM.term, by: (t && t.by) || S.me.name } }], e => { toast("The exam was not saved: " + e.message, true); $("mentry") && ($("mentry").innerHTML = ""); });
   }
-  await mRun($("mentry"), c, s, tid); tInfo();
+  await mRun($("mentry"), c, s, tid, false, true); tInfo();
 });
 
 /* ----- shared data: one row per student, one column per subject ----- */
@@ -772,27 +784,27 @@ A.logoUp = () => imgPick(300, logoSend);
 A.logoDel = () => logoSend("");
 
 /* ----- notebooks: remove one entry, move or delete a whole day ----- */
-A.nsDel = b => busy(b, async () => {
+A.nsDel = () => {
   if (!confirm("Delete this notebook entry?")) return;
-  try { await patch(N.ep, [{ k: `entries.${N.date}.${NS.id}`, v: null }]); } catch (x) { return $("e2").textContent = x.message; }
+  patchQ(N.ep, [{ k: `entries.${N.date}.${NS.id}`, v: null }], e => { toast("Not deleted: " + e.message, true); if ($("n-ls")) entryDraw("n"); });
   entryDraw("n"); closeSheet(true); toast("Entry deleted");
-});
+};
 A.nDay = () => {
   const n = Object.keys(((D[N.ep] || {}).entries || {})[N.date] || {}).length; if (!n) return toast("No entries on " + fmtD(N.date) + ".", true);
   sheetL(`<h2>Entries of ${esc(fmtD(N.date))}</h2><p class="sub">${n} notebook ${n === 1 ? "entry" : "entries"} · ${esc(N.cls)} ${esc(N.sub)}</p><div class="form"><label>Move all of them to date<input id="ndn" type="date" value="${esc(N.date)}"></label></div><p></p><div class="row"><button class="btn" data-a="nMove" style="flex:2">Move</button><button class="btn alt" data-a="nDelDay">Delete all</button></div><p></p><button class="btn alt" data-a="close">Close</button>`);
 };
-A.nMove = b => busy(b, async () => {
+A.nMove = () => {
   const to = $("ndn").value, from = N.date, en = D[N.ep].entries || {}, src = en[from] || {}; if (!to || to === from) return toast("Choose a different date.", true);
   const clash = Object.keys(src).filter(id => (en[to] || {})[id]).length; if (clash && !confirm(clash + " students already have an entry on that date. Replace them?")) return;
   const ops = Object.entries(src).flatMap(([id, v]) => [{ k: `entries.${to}.${id}`, v }, { k: `entries.${from}.${id}`, v: null }]);
-  try { for (const part of chunk(ops, 100)) await patch(N.ep, part); await patch(N.ep, [{ k: `entries.${from}`, v: null }]); } catch (x) { return toast(x.message, true); }
+  patchQAll(N.ep, [...ops, { k: `entries.${from}`, v: null }], e => { toast("Not moved: " + e.message, true); nbDraw(); });
   closeSheet(true); toast("Entries moved to " + fmtD(to)); $("ndate").value = to; N.date = to; nbDraw();
-});
-A.nDelDay = b => busy(b, async () => {
+};
+A.nDelDay = () => {
   const src = (D[N.ep].entries || {})[N.date] || {}, ids = Object.keys(src); if (!confirm(`Delete all ${ids.length} notebook entries of ${fmtD(N.date)}?`)) return;
-  try { for (const part of chunk([...ids.map(id => ({ k: `entries.${N.date}.${id}`, v: null })), { k: `entries.${N.date}`, v: null }], 150)) await patch(N.ep, part); } catch (x) { return toast(x.message, true); }
+  patchQAll(N.ep, [...ids.map(id => ({ k: `entries.${N.date}.${id}`, v: null })), { k: `entries.${N.date}`, v: null }], e => { toast("Not deleted: " + e.message, true); nbDraw(); });
   closeSheet(true); toast("Entries deleted"); nbDraw();
-});
+};
 
 
 /* ----- dropdowns: the browser's plain popup is replaced by a menu in the app's own style ----- */
@@ -843,22 +855,42 @@ function cTab() {
 }
 
 /* ----- weekly monitors: automatic round-robin, incharge can override ----- */
+/* ----- weekly monitors: automatic round-robin, incharge can override; every class can have its own categories ----- */
+const monCats = cls => { const c = getAt(FD("monitors", cls), ["cats"]); return Array.isArray(c) && c.length ? c : S.cfg.monitorCategories; };
 function monitorFor(cls, offset, ci) {
-  const cats = S.cfg.monitorCategories, d = new Date(); d.setDate(d.getDate() + 7 * offset);
+  const cats = monCats(cls), d = new Date(); d.setDate(d.getDate() + 7 * offset);
   const key = weekKey(d), roster = classStudents(cls);
   const o = getAt(FD("monitors", cls), ["over", key, termKey(cats[ci])]), ov = o && stuById(o);
   if (ov) return { s: ov, over: true, key };
   return { s: roster.length ? roster[(weekIdx(d) * cats.length + ci) % roster.length] : null, over: false, key };
 }
 function cMon(host) {
-  const cats = S.cfg.monitorCategories, roster = classStudents(C.cls);
-  if (!cats.length) return host.innerHTML = noAccess("The admin has not set any monitor categories yet.");
-  host.innerHTML = `<div class="card"><h3>This week's monitors</h3><p class="sub">Roster rotates automatically so every student gets a turn. Pick a name to override.</p>${[0, 1].map(off => `<h4>${off ? "Next week" : "This week"}</h4><div class="mons">${cats.map((c, i) => { const m = monitorFor(C.cls, off, i); return `<div class="mon"><span class="mcat">${esc(c)}</span><span class="mp p${i % 3}">${m.s ? esc(m.s.name) : "—"}${m.over ? " ✎" : ""}</span><select data-c="monSet" data-cat="${esc(c)}" data-off="${off}" aria-label="Override ${esc(c)}"><option value="">Auto</option>${roster.map(s => `<option value="${esc(s.id)}" ${m.over && m.s.id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>`; }).join("")}</div>`).join("")}</div>`;
+  const cats = monCats(C.cls), roster = classStudents(C.cls), own = Array.isArray(getAt(FD("monitors", C.cls), ["cats"])) && getAt(FD("monitors", C.cls), ["cats"]).length;
+  const head = `<div class="row between"><h3 style="margin:0">This week's monitors</h3><button class="btn alt sm" data-a="monCats">Edit categories</button></div>`;
+  if (!cats.length) return host.innerHTML = `<div class="card">${head}<p class="sub">No monitor categories yet. Tap “Edit categories” to add the ones your class needs (Discipline, Diary, Cleanliness…).</p></div>`;
+  host.innerHTML = `<div class="card">${head}<p class="sub">Roster rotates automatically so every student gets a turn. Pick a name to override. ${own ? "These categories are set for your class." : "Using the school's default categories."}</p>${[0, 1].map(off => `<h4>${off ? "Next week" : "This week"}</h4><div class="mons">${cats.map((c, i) => { const m = monitorFor(C.cls, off, i); return `<div class="mon"><span class="mcat">${esc(c)}</span><span class="mp p${i % 3}">${m.s ? esc(m.s.name) : "—"}${m.over ? " ✎" : ""}</span><select data-c="monSet" data-cat="${esc(c)}" data-off="${off}" aria-label="Override ${esc(c)}"><option value="">Auto</option>${roster.map(s => `<option value="${esc(s.id)}" ${m.over && m.s.id === s.id ? "selected" : ""}>${esc(s.name)}</option>`).join("")}</select></div>`; }).join("")}</div>`).join("")}</div>`;
 }
-A.monSet = async b => {
-  const d = new Date(); d.setDate(d.getDate() + 7 * +b.dataset.off); const key = weekKey(d);
-  try { await patch(P.k("monitors", C.cls), [{ k: `over.${key}.${termKey(b.dataset.cat)}`, v: b.value || null }]); cMon($("cbody")); } catch (x) { toast(x.message, true); }
+A.monSet = b => {
+  const d = new Date(); d.setDate(d.getDate() + 7 * +b.dataset.off); const key = weekKey(d), cls = C.cls;
+  patchQ(P.k("monitors", cls), [{ k: `over.${key}.${termKey(b.dataset.cat)}`, v: b.value || null }], e => { toast("Monitor was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  cMon($("cbody"));
 };
+/* category editor */
+const mcRow = v => `<div class="mcrow"><input class="mcn" value="${esc(v)}" placeholder="Category name (e.g. Discipline)" maxlength="24" aria-label="Category name"><button class="link" data-a="mcDel" aria-label="Remove category">✕</button></div>`;
+A.monCats = () => {
+  const cats = monCats(C.cls);
+  sheet(`<h2>Monitor categories · ${esc(C.cls)}</h2><p class="sub">These are for your class only. The weekly rotation uses this list. Renaming a category starts it fresh (earlier overrides for the old name are not carried over).</p><div id="mcl" class="mcl">${(cats.length ? cats : [""]).map(mcRow).join("")}</div><p><button class="btn alt sm" data-a="mcAdd">Add category</button></p><div class="row"><button class="btn" data-a="mcSave" style="flex:2">Save</button><button class="btn alt" data-a="mcDefault">Use school default</button></div><p></p><button class="btn alt" data-a="close">Cancel</button><div class="err" id="e2"></div>`);
+};
+A.mcAdd = () => { $("mcl").insertAdjacentHTML("beforeend", mcRow("")); dirty = true; $("mcl").lastElementChild.querySelector("input").focus(); };
+A.mcDel = b => { b.closest(".mcrow").remove(); dirty = true; };
+A.mcSave = () => {
+  const list = [...document.querySelectorAll("#mcl .mcn")].map(i => i.value.replace(/\s+/g, " ").trim()).filter(Boolean);
+  if (new Set(list.map(x => x.toLowerCase())).size !== list.length) return $("e2").textContent = "Two categories have the same name.";
+  if (list.length > 12) return $("e2").textContent = "Use at most 12 categories.";
+  const cls = C.cls; patchQ(P.k("monitors", cls), [{ k: "cats", v: list.length ? list : null }], e => { toast("Categories were not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  closeSheet(true); cMon($("cbody")); toast("Categories saved");
+};
+A.mcDefault = () => { const cls = C.cls; patchQ(P.k("monitors", cls), [{ k: "cats", v: null }], e => { toast(e.message, true); if (C.cls === cls && $("cbody")) cTab(); }); closeSheet(true); cMon($("cbody")); toast("Using the school's default categories"); };
 
 /* ----- fines & dues ----- */
 function cFine(host) {
@@ -881,9 +913,9 @@ A.fSave = b => busy(b, async () => {
   const cls = C.cls; patchQ(P.k("fines", cls), [{ k: "items." + id, v: { sid, type: $("ft").value, amt, date: $("fd").value, paid: 0, r: $("fr").value.trim(), by: S.me.name, t: Date.now() } }], e => { toast("A fine was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFine($("cbody")); const n = entryNext("f", sid); n ? fOpen(n.id) : closeSheet(true); toast("Saved");
 });
-A.fPay = async b => {
-  const f = FD("fines", C.cls).items[b.dataset.id];
-  try { await patch(P.k("fines", C.cls), [{ k: `items.${b.dataset.id}.paid`, v: f.paid ? 0 : 1 }, { k: `items.${b.dataset.id}.pd`, v: f.paid ? null : today() }]); } catch (x) { return toast(x.message, true); }
+A.fPay = b => {
+  const f = FD("fines", C.cls).items[b.dataset.id], cls = C.cls;
+  patchQ(P.k("fines", cls), [{ k: `items.${b.dataset.id}.paid`, v: f.paid ? 0 : 1 }, { k: `items.${b.dataset.id}.pd`, v: f.paid ? null : today() }], e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   fOpen(b.dataset.s); cFine($("cbody"));
 };
 
@@ -912,7 +944,7 @@ A.cSave = b => busy(b, async () => {
 
 /* ----- log manager (calls + fines): edit, change dates and delete one or many ----- */
 let LG = {};
-const lgItems = k => k === "calls" ? callsOf(C.cls) : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date));
+const lgItems = k => (k === "calls" ? callsOf(C.cls) : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date))).filter(x => stuById(x.sid));
 function logDraw(k) {
   const host = $(k === "calls" ? "clog" : "flog"); if (!host) return; const L = LG[k] = LG[k] || { sel: new Set(), n: 15, q: "" };
   host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? "Call log" : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>
@@ -931,7 +963,7 @@ A.lgChk = b => { const L = LG[b.dataset.k]; b.checked ? L.sel.add(b.dataset.id) 
 A.lgMore = b => { LG[b.dataset.k].n += 20; logList(b.dataset.k); };
 A.lgAll = b => { const k = b.dataset.k, L = LG[k], vis = [...document.querySelectorAll(`#ll-${k} input[type=checkbox]`)], on = vis.some(c => !c.checked); vis.forEach(c => { c.checked = on; on ? L.sel.add(c.dataset.id) : L.sel.delete(c.dataset.id); }); lgCount(k); };
 const lgSel = k => { const ids = [...LG[k].sel]; if (!ids.length) toast("Tick at least one entry first.", true); return ids; };
-const lgRun = async (k, ops, msg) => { try { for (const part of chunk(ops, 150)) await patch(P.k(k, C.cls), part); } catch (x) { return toast(x.message, true); } toast(msg); cTab(); };
+const lgRun = (k, ops, msg) => { const cls = C.cls; patchQAll(P.k(k, cls), ops, e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); }); toast(msg); cTab(); };
 A.lgDel = b => { const k = b.dataset.k, ids = lgSel(k); if (!ids.length || !confirm(`Delete ${ids.length} selected ${ids.length === 1 ? "entry" : "entries"}?`)) return; ids.forEach(i => LG[k].sel.delete(i)); lgRun(k, ids.map(i => ({ k: "items." + i, v: null })), ids.length + " deleted"); };
 A.lgPaid = b => { const ids = lgSel("fines"); if (!ids.length) return; lgRun("fines", ids.flatMap(i => [{ k: `items.${i}.paid`, v: 1 }, { k: `items.${i}.pd`, v: today() }]), "Marked paid"); };
 A.lgDate = b => { const k = b.dataset.k, ids = lgSel(k); if (!ids.length) return; LG.cur = { k, ids }; sheetL(`<h2>Change date</h2><p class="sub">${ids.length} selected ${ids.length === 1 ? "entry" : "entries"} will move to this date.</p><input id="lgd" type="date" value="${today()}" style="width:100%"><p></p><div class="row"><button class="btn" data-a="lgDateGo" style="flex:2">Apply</button><button class="btn alt" data-a="close">Cancel</button></div>`); };
@@ -943,15 +975,15 @@ A.lgEdit = b => {
     : `<div class="row"><select id="et" aria-label="Type">${Object.entries(FTYPE).map(([a, v]) => `<option value="${a}" ${a === x.type ? "selected" : ""}>${v}</option>`).join("")}</select><input id="ea" type="number" inputmode="decimal" value="${x.amt}" aria-label="Amount"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"></div><p><input id="en" placeholder="Remark" value="${esc(x.r || "")}" style="width:100%"></p><label class="cb"><input type="checkbox" id="ep" ${x.paid ? "checked" : ""}> Paid</label>`)
     + `<p></p><div class="row"><button class="btn" data-a="lgSave" style="flex:2">Save</button><button class="btn alt" data-a="lgDelOne">Delete</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
 };
-A.lgSave = b => busy(b, async () => {
+A.lgSave = b => {
   const { k, x } = LG.cur, { id, ...rest } = x; let v;
   if (!$("ed").value) return $("e2").textContent = "Pick a date.";
   if (k === "calls") v = Object.assign(rest, { date: $("ed").value, resp: $("er").value, r: $("en").value.trim(), t: Date.now() });
   else { const amt = +$("ea").value; if (!(amt > 0)) return $("e2").textContent = "Enter an amount."; const paid = $("ep").checked ? 1 : 0; v = Object.assign(rest, { type: $("et").value, amt, date: $("ed").value, r: $("en").value.trim(), paid, t: Date.now() }); if (paid) v.pd = rest.pd || today(); else delete v.pd; }
-  try { await patch(P.k(k, C.cls), [{ k: "items." + id, v }]); } catch (e) { return $("e2").textContent = e.message; }
+  const cls = C.cls; patchQ(P.k(k, cls), [{ k: "items." + id, v }], e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   closeSheet(true); toast("Saved"); cTab();
-});
-A.lgDelOne = async () => { const { k, id } = LG.cur; if (!confirm("Delete this entry?")) return; try { await patch(P.k(k, C.cls), [{ k: "items." + id, v: null }]); } catch (e) { return toast(e.message, true); } closeSheet(true); toast("Deleted"); cTab(); };
+};
+A.lgDelOne = () => { const { k, id } = LG.cur; if (!confirm("Delete this entry?")) return; const cls = C.cls; patchQ(P.k(k, cls), [{ k: "items." + id, v: null }], e => { toast("Not deleted: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); }); closeSheet(true); toast("Deleted"); cTab(); };
 
 /* ----- fees, month-wise (academic year April to March) ----- */
 const MN = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"];
@@ -1019,9 +1051,9 @@ A.fySave = b => busy(b, async () => {
   const cls = C.cls; patchQ(P.k("fees", cls), [{ k: `${fyKey(FY.y)}.${sid}`, v }], e => { toast("Fee entry was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFee($("cbody")); const n = entryNext("e", sid); n ? feeOpen(n.id) : closeSheet(true); toast("Saved");
 });
-A.fyClear = async () => {
+A.fyClear = () => {
   if (!confirm("Remove this student's fee record for the year?")) return;
-  try { await patch(P.k("fees", C.cls), [{ k: `${fyKey(FY.y)}.${FY.sid}`, v: null }]); } catch (x) { return toast(x.message, true); }
+  const cls = C.cls; patchQ(P.k("fees", cls), [{ k: `${fyKey(FY.y)}.${FY.sid}`, v: null }], e => { toast("Not cleared: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   closeSheet(true); cFee($("cbody")); toast("Cleared");
 };
 
@@ -1034,7 +1066,7 @@ function cAtt(host) {
   entry($("aent"), { id: "a", cls: C.cls, note: `Total days absent and leaves taken in <b>${esc(monthLabel(C.am))}</b>. Tap a student.`, done: s => !!attOf(C.cls, C.am, s.id), tail: s => { const a = attOf(C.cls, C.am, s.id); return a ? `${a.a || 0} absent · ${a.l || 0} leave` : ""; }, pick: aOpen });
 }
 A.aMonth = b => { if (b.value) { C.am = b.value; cAtt($("cbody")); } };
-A.aWd = b => patch(P.k("attendance", C.cls), [{ k: `${C.am}._wd`, v: b.value === "" ? null : +b.value }]).then(() => toast("Working days saved")).catch(x => toast(x.message, true));
+A.aWd = b => { const cls = C.cls; patchQ(P.k("attendance", cls), [{ k: `${C.am}._wd`, v: b.value === "" ? null : +b.value }], e => toast("Working days not saved: " + e.message, true)); toast("Working days saved"); };
 function aOpen(id) {
   const a = attOf(C.cls, C.am, id) || {};
   sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">${esc(monthLabel(C.am))}</p><div class="row"><label class="fl">Days absent<input id="aa" type="number" inputmode="numeric" min="0" value="${a.a ?? ""}" placeholder="0" autofocus></label><label class="fl">Leaves taken<input id="al" type="number" inputmode="numeric" min="0" value="${a.l ?? ""}" placeholder="0"></label></div><p></p><div class="row"><button class="btn" data-a="aSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button>${a.t ? `<button class="btn alt" data-a="aClear" data-id="${esc(id)}">Clear</button>` : ""}</div><div class="err" id="e2"></div>`);
@@ -1045,7 +1077,7 @@ A.aSave = b => busy(b, async () => {
   const cls = C.cls; patchQ(P.k("attendance", cls), [{ k: `${C.am}.${sid}`, v: { a, l, by: S.me.name, t: Date.now() } }], e => { toast("Attendance was not saved: " + e.message, true); if (C.cls === cls && $("aent")) cAtt($("cbody")); });
   dirty = false; entryDraw("a"); const n = entryNext("a", sid); n ? aOpen(n.id) : closeSheet(true);
 });
-A.aClear = async b => { try { await patch(P.k("attendance", C.cls), [{ k: `${C.am}.${b.dataset.id}`, v: null }]); } catch (x) { return toast(x.message, true); } entryDraw("a"); closeSheet(true); };
+A.aClear = b => { const cls = C.cls; patchQ(P.k("attendance", cls), [{ k: `${C.am}.${b.dataset.id}`, v: null }], e => { toast("Not cleared: " + e.message, true); if (C.cls === cls && $("aent")) cAtt($("cbody")); }); entryDraw("a"); closeSheet(true); };
 function attRows(cls, sid, y = ayStart()) {
   const at = FD("attendance", cls); return Object.keys(at).filter(m => /^\d{4}-\d{2}$/.test(m) && m >= y + "-04" && m <= (y + 1) + "-03" && at[m][sid]).sort().map(m => ({ m, wd: at[m]._wd, a: at[m][sid].a || 0, l: at[m][sid].l || 0 }));
 }
@@ -1055,30 +1087,78 @@ function attHTML(cls, sid) {
 }
 
 
-/* ----- students: the class incharge can add and correct students of their own class ----- */
+/* ----- students: add, correct, remove to the archive and restore (class incharge and admin) ----- */
+S.arch = S.arch || [];
+const newSid = () => "sx" + Date.now().toString(36).slice(-6) + Math.random().toString(36).slice(2, 4);
+const redrawStu = () => { if (typeof cur !== "undefined" && cur === "cls" && C.tab === "stu" && $("cbody")) cStu($("cbody")); if (typeof cur !== "undefined" && cur === "admin" && AD.tab === "students" && $("adb")) adStudents($("adb")); };
+async function loadArch() { try { S.arch = (await api("GET", "/students/archive")).students || []; } catch { } document.querySelectorAll("[data-a=cuArch],[data-a=adArch]").forEach(b => { const n = S.arch.filter(a => a.cls === (b.dataset.a === "adArch" ? AD.cls : C.cls)).length; b.textContent = "Archive" + (n ? " (" + n + ")" : ""); }); return S.arch; }
+/* the new student appears at once; the server is told in the background */
+function stuAddQ(items) {
+  const seen = new Set(), recs = [];
+  items.forEach(i => { const name = String(i.name).replace(/\s+/g, " ").trim(), k = i.cls + "|" + nk(name); if (!name || seen.has(k) || classStudents(i.cls).some(s => nk(s.name) === nk(name))) return; seen.add(k); recs.push(Object.assign({ id: newSid(), name, cls: i.cls }, i.roll ? { roll: String(i.roll).slice(0, 8) } : {})); });
+  if (!recs.length) return recs;
+  recs.forEach(upsertStu); redrawStu();
+  api("POST", "/students/add", { students: recs }).then(res => res.students.forEach((s, i) => { if (s.id !== recs[i].id) { S.students = S.students.filter(x => x.id !== recs[i].id); upsertStu(s); } }))
+    .catch(e => { S.students = S.students.filter(x => !recs.some(r => r.id === x.id)); toast("Not added: " + e.message, true); }).finally(redrawStu);
+  return recs;
+}
+function stuUpdQ(id, name, roll) {
+  const old = Object.assign({}, stuById(id)); if (!old.id) return;
+  name = String(name).replace(/\s+/g, " ").trim(); if (classStudents(old.cls).some(s => s.id !== id && nk(s.name) === nk(name))) return toast("Another student in this class has that name.", true);
+  upsertStu(Object.assign({}, old, { name, roll: roll || undefined })); redrawStu();
+  api("POST", "/students/update", { id, name, roll }).catch(e => { upsertStu(old); toast("Not saved: " + e.message, true); redrawStu(); });
+}
+function stuArchiveQ(ids) {
+  const recs = ids.map(stuById).filter(Boolean); if (!recs.length) return;
+  const before = S.students.slice(); S.students = S.students.filter(s => !ids.includes(s.id)); recs.forEach(r => S.arch.push(Object.assign({}, r, { archivedAt: today() }))); redrawStu();
+  api("POST", "/students/remove", { ids }).then(() => toast(recs.length + (recs.length === 1 ? " student" : " students") + " moved to the archive"))
+    .catch(e => { S.students = before; S.arch = S.arch.filter(a => !ids.includes(a.id)); toast("Not removed: " + e.message, true); redrawStu(); });
+}
+function stuRestoreQ(id, name) {
+  const a = S.arch.find(x => x.id === id); if (!a) return;
+  name = String(name || a.name).replace(/\s+/g, " ").trim(); if (classStudents(a.cls).some(s => nk(s.name) === nk(name))) return toast("A student named " + name + " is already in " + a.cls + ".", true);
+  const rec = Object.assign({}, a, { name }); delete rec.archivedAt; delete rec.by; upsertStu(rec); const before = S.arch.slice(); S.arch = S.arch.filter(x => x.id !== id); redrawStu();
+  api("POST", "/students/restore", { id, name }).then(() => toast(name + " restored with all earlier records"))
+    .catch(e => { S.students = S.students.filter(s => s.id !== id); S.arch = before; toast("Not restored: " + e.message, true); redrawStu(); });
+}
 function cStu(host) {
-  const list = classStudents(C.cls);
-  host.innerHTML = `<div class="row"><button class="btn" data-a="cuEdit" data-id="">Add student</button><button class="btn alt" data-a="cuBulk">Add several</button></div><div class="card"><b>${list.length} students in ${esc(C.cls)}</b>${list.map(s => `<div class="li"><span>${esc(s.name)}${s.roll ? ` <small class="sub">roll ${esc(s.roll)}</small>` : ""}</span><button class="link" data-a="cuEdit" data-id="${esc(s.id)}">Edit</button></div>`).join("") || `<p class="sub">No students yet.</p>`}</div><p class="sub">Use Edit to fix a spelling. Removing a student is done by the admin.</p>`;
+  const list = classStudents(C.cls), na = S.arch.filter(a => a.cls === C.cls).length;
+  host.innerHTML = `<div class="row"><button class="btn" data-a="cuEdit" data-id="">Add student</button><button class="btn alt" data-a="cuBulk">Add several</button><button class="btn alt" data-a="cuArch">Archive${na ? " (" + na + ")" : ""}</button></div>
+   <div class="card"><div class="row between"><b>${list.length} students in ${esc(C.cls)}</b>${list.length ? `<button class="link" data-a="cuRemSel">Remove selected</button>` : ""}</div>${list.map(s => `<div class="lrow"><label class="cb"><input type="checkbox" class="cuc" value="${esc(s.id)}" aria-label="Select ${esc(s.name)}"></label><div class="lm"><b>${esc(s.name)}</b>${s.roll ? `<small>roll ${esc(s.roll)}</small>` : ""}</div><button class="link" data-a="cuEdit" data-id="${esc(s.id)}">Edit</button></div>`).join("") || `<p class="sub">No students yet.</p>`}</div>
+   <p class="sub">Removed students go to the Archive with all their marks, notebooks, calls and fees. Restore them any time, even under a new name.</p>`;
+  loadArch();
 }
 A.cuEdit = b => {
   const s = stuById(b.dataset.id) || { id: "", name: "", roll: "" };
-  sheet(`<h2>${s.id ? "Edit student" : "Add student to " + esc(C.cls)}</h2><div class="form"><input id="sn" placeholder="Full name" value="${esc(s.name)}" autofocus><input id="sr" placeholder="Roll no. (optional)" value="${esc(s.roll || "")}"></div><p></p><div class="row"><button class="btn" data-a="cuSave" data-id="${esc(s.id)}" style="flex:2">Save</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+  sheet(`<h2>${s.id ? "Edit student" : "Add student to " + esc(C.cls)}</h2><div class="form"><input id="sn" placeholder="Full name" value="${esc(s.name)}" autofocus><input id="sr" placeholder="Roll no. (optional)" value="${esc(s.roll || "")}"></div><p></p><div class="row"><button class="btn" data-a="cuSave" data-id="${esc(s.id)}" style="flex:2">Save</button><button class="btn alt" data-a="close">Cancel</button></div>${s.id ? `<p></p><button class="btn alt sm" data-a="cuRem" data-id="${esc(s.id)}">Remove student (move to archive)</button>` : ""}<div class="err" id="e2"></div>`);
 };
-A.cuSave = b => busy(b, async () => {
+A.cuSave = b => {
   const name = $("sn").value.trim(), roll = $("sr").value.trim(); if (!name) return $("e2").textContent = "Enter a name.";
-  try {
-    if (b.dataset.id) upsertStu((await api("POST", "/students/update", { id: b.dataset.id, name, roll })).student);
-    else { const r = await api("POST", "/students/add", { students: [{ name, cls: C.cls, roll }] }); upsertStu(r.students[0]); if (!r.created.length) toast("That student is already in the class."); }
-  } catch (x) { return $("e2").textContent = x.message; }
-  closeSheet(true); cStu($("cbody"));
-});
-A.cuBulk = () => sheet(`<h2>Add several students</h2><p class="sub">One per line: <b>Name</b> or <b>Name, roll no.</b>. Students already in ${esc(C.cls)} are kept as they are.</p><textarea id="sb" rows="8" autofocus></textarea><p></p><div class="row"><button class="btn" data-a="cuBulkGo" style="flex:2">Add</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
-A.cuBulkGo = b => busy(b, async () => {
+  if (b.dataset.id) { stuUpdQ(b.dataset.id, name, roll); return closeSheet(true); }
+  const ar = S.arch.find(a => a.cls === C.cls && nk(a.name) === nk(name));
+  if (ar && confirm(`“${ar.name}” is in the archive (removed ${fmtD(ar.archivedAt)}). Restore them with all their earlier records?\n\nOK = restore, Cancel = add as a brand-new student.`)) { stuRestoreQ(ar.id, ar.name); return closeSheet(true); }
+  if (classStudents(C.cls).some(s => nk(s.name) === nk(name))) return $("e2").textContent = "That student is already in the class.";
+  stuAddQ([{ name, cls: C.cls, roll }]); closeSheet(true);
+};
+A.cuBulk = () => sheet(`<h2>Add several students</h2><p class="sub">One per line: <b>Name</b> or <b>Name, roll no.</b>. Students already in ${esc(C.cls)} are skipped.</p><textarea id="sb" rows="8" autofocus></textarea><p></p><div class="row"><button class="btn" data-a="cuBulkGo" style="flex:2">Add</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+A.cuBulkGo = () => {
   const list = $("sb").value.split("\n").map(l => l.trim()).filter(Boolean).map(l => { const [name, roll] = l.split(",").map(x => x.trim()); return { name, cls: C.cls, roll }; });
   if (!list.length) return $("e2").textContent = "Type at least one name.";
-  try { const r = await api("POST", "/students/add", { students: list }); r.students.forEach(upsertStu); closeSheet(true); toast(r.created.length + " added" + (r.students.length > r.created.length ? ", " + (r.students.length - r.created.length) + " already existed" : "")); } catch (x) { return $("e2").textContent = x.message; }
-  cStu($("cbody"));
-});
+  const n = stuAddQ(list).length; closeSheet(true); toast(n + " added" + (n < list.length ? ", " + (list.length - n) + " already in the class" : ""));
+};
+A.cuRem = b => { const s = stuById(b.dataset.id); if (!s || !confirm(`Remove ${s.name}? They move to the Archive with all their records and can be restored later.`)) return; closeSheet(true); stuArchiveQ([s.id]); };
+A.cuRemSel = () => {
+  const ids = [...document.querySelectorAll(".cuc:checked")].map(c => c.value); if (!ids.length) return toast("Tick the students to remove first.", true);
+  if (!confirm(`Remove ${ids.length} ${ids.length === 1 ? "student" : "students"}? They move to the Archive with all their records and can be restored later.`)) return; stuArchiveQ(ids);
+};
+async function archDraw(cls) {
+  sheetL(`<h2>Archive · ${esc(cls)}</h2><p class="sub">Loading…</p>`); await loadArch();
+  const list = S.arch.filter(a => a.cls === cls);
+  sheetL(`<h2>Archive · ${esc(cls)}</h2><p class="sub">Removed students keep all their marks, notebooks, calls and fees. Restore one to bring everything back. You can give them a new name.</p><div class="mlist">${list.map(a => `<div class="lrow"><div class="lm"><b>${esc(a.name)}</b><small>removed ${esc(fmtD(a.archivedAt || today()))}</small></div><button class="link" data-a="arRestore" data-id="${esc(a.id)}">Restore</button></div>`).join("") || `<p class="sub">Nothing in the archive.</p>`}</div><p></p><button class="btn alt" data-a="close">Close</button>`);
+}
+A.cuArch = () => archDraw(C.cls); A.adArch = () => archDraw(AD.cls);
+A.arRestore = b => { const a = S.arch.find(x => x.id === b.dataset.id); if (!a) return; sheet(`<h2>Restore ${esc(a.name)}</h2><p class="sub">All their earlier records in ${esc(a.cls)} come back. Change the name if they should return under a different one.</p><input id="arn" value="${esc(a.name)}" style="width:100%" autofocus><p></p><div class="row"><button class="btn" data-a="arGo" data-id="${esc(a.id)}" style="flex:2">Restore</button><button class="btn alt" data-a="close">Cancel</button></div>`); };
+A.arGo = b => { const name = $("arn").value.trim(); if (!name) return; closeSheet(true); stuRestoreQ(b.dataset.id, name); };
 /* ===== insights.js ===== */
 /* ===== Insights: class analytics, single-student page, printable reports ===== */
 const I = { cls: "", tab: "ov", sid: "" };
@@ -1226,7 +1306,7 @@ A.uDel = async b => { if (!confirm("Delete " + b.dataset.u + "? Their entered re
 function adStudents(host) {
   if (!S.cfg.classes.includes(AD.cls)) AD.cls = S.cfg.classes[0];
   const list = classStudents(AD.cls);
-  host.innerHTML = `<div class="row"><select id="adc" data-c="adCls" aria-label="Class">${S.cfg.classes.map(c => `<option ${c === AD.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><button class="btn" data-a="sEdit" data-id="">Add student</button><button class="btn alt" data-a="sBulk">Import list</button></div>
+  host.innerHTML = `<div class="row"><select id="adc" data-c="adCls" aria-label="Class">${S.cfg.classes.map(c => `<option ${c === AD.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select><button class="btn" data-a="sEdit" data-id="">Add student</button><button class="btn alt" data-a="sBulk">Import list</button><button class="btn alt" data-a="adArch">Archive</button></div>
    <div class="card"><b>${list.length} students in ${esc(AD.cls)}</b>${list.map(s => `<div class="li"><span>${esc(s.name)}${s.roll ? ` <small class="sub">roll ${esc(s.roll)}</small>` : ""}</span><span><button class="link" data-a="sEdit" data-id="${esc(s.id)}">Edit</button><button class="link" data-a="sDel" data-id="${esc(s.id)}">Remove</button></span></div>`).join("") || `<p class="sub">No students yet.</p>`}</div>`;
 }
 A.adCls = b => { AD.cls = b.value; adStudents($("adb")); };
@@ -1482,9 +1562,9 @@ let IM = null;
 A.impRead = b => busy(b, async () => {
   $("ierr").textContent = ""; const f = $("xfile").files[0]; if (!f) return $("ierr").textContent = "Choose an Excel file first."; IM = null;
   try {
-    await loadXlsx(); const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), un = impScan(wb), inch = inchargeClasses();
+    await loadXlsx(); const wb = XLSX.read(await f.arrayBuffer(), { type: "array" }), un = impScan(wb), inch = inchargeClasses(); if (un.length) await loadArch();
     if (un.length) {
-      IM = { wb, list: un.map(u => { const k = nk(u.name), cands = classStudents(u.c).map(s => ({ id: s.id, name: s.name, sc: nameSim(k, nk(s.name)) })).sort((x, y) => y.sc - x.sc).slice(0, 12), best = cands[0], canNew = inch.includes(u.c); cands.forEach(c => c.best = c === best && c.sc >= .6); return Object.assign(u, { cands, canNew, sel: best && best.sc >= .85 ? best.id : canNew ? "new" : "skip" }); }) };
+      IM = { wb, list: un.map(u => { const k = nk(u.name), cands = classStudents(u.c).map(s => ({ id: s.id, name: s.name, sc: nameSim(k, nk(s.name)) })).sort((x, y) => y.sc - x.sc).slice(0, 12), best = cands[0], canNew = inch.includes(u.c); cands.forEach(c => c.best = c === best && c.sc >= .6); const arc = S.arch.filter(a => a.cls === u.c).map(a => ({ id: "arch:" + a.id, name: a.name, sc: nameSim(k, nk(a.name)), arch: true })).sort((x, y) => y.sc - x.sc).slice(0, 6), ab = arc[0]; return Object.assign(u, { cands: [...(ab && ab.sc >= .85 ? arc : []), ...cands, ...(ab && ab.sc < .85 ? arc : [])], canNew, sel: ab && ab.sc >= .85 ? ab.id : best && best.sc >= .85 ? best.id : canNew ? "new" : "skip" }); }) };
       return impMatchDraw();
     }
     await impChapters(wb, {}, []);
@@ -1529,15 +1609,16 @@ A.imChGo = b => busy(b, async () => {
 });
 function impMatchDraw() {
   sheetL(`<h2>Students not found</h2><p class="sub">${IM.list.length} ${IM.list.length === 1 ? "name" : "names"} in the file ${IM.list.length === 1 ? "is" : "are"} not in the student list. For each one, create a new student, choose the existing student it really is (spelling difference), or skip its rows.</p><div class="row"><button class="btn alt sm" data-a="imAll" data-v="new">Create all as new</button><button class="btn alt sm" data-a="imAll" data-v="skip">Skip all</button></div>
-   <div class="mlist">${IM.list.map((r, i) => `<div class="mrow"><div><b>${esc(r.name)}</b><br><small>Class ${esc(r.c)} · ${r.n} ${r.n === 1 ? "row" : "rows"}</small></div><select data-c="imSel" data-i="${i}" aria-label="Match ${esc(r.name)}">${r.canNew ? `<option value="new" ${r.sel === "new" ? "selected" : ""}>Create new student</option>` : ""}<option value="skip" ${r.sel === "skip" ? "selected" : ""}>Skip these rows</option>${r.cands.map(c => `<option value="${esc(c.id)}" ${r.sel === c.id ? "selected" : ""}>= ${esc(c.name)}${c.best ? " (closest)" : ""}</option>`).join("")}</select></div>`).join("")}</div>
+   <div class="mlist">${IM.list.map((r, i) => `<div class="mrow"><div><b>${esc(r.name)}</b><br><small>Class ${esc(r.c)} · ${r.n} ${r.n === 1 ? "row" : "rows"}</small></div><select data-c="imSel" data-i="${i}" aria-label="Match ${esc(r.name)}">${r.canNew ? `<option value="new" ${r.sel === "new" ? "selected" : ""}>Create new student</option>` : ""}<option value="skip" ${r.sel === "skip" ? "selected" : ""}>Skip these rows</option>${r.cands.map(c => `<option value="${esc(c.id)}" ${r.sel === c.id ? "selected" : ""}>${c.arch ? "↺ Restore archived: " : "= "}${esc(c.name)}${c.best ? " (closest)" : ""}</option>`).join("")}</select></div>`).join("")}</div>
    <p class="sub">New students are added to the class as soon as you continue. Only the class incharge or admin can create students.</p><div class="row"><button class="btn" data-a="imMatchGo" style="flex:2">Continue</button><button class="btn alt" data-a="close">Cancel</button></div>`);
 }
 A.imSel = b => { IM.list[+b.dataset.i].sel = b.value; };
 A.imAll = b => { IM.list.forEach(r => r.sel = b.dataset.v === "new" && r.canNew ? "new" : "skip"); impMatchDraw(); };
 A.imMatchGo = b => busy(b, async () => {
-  const alias = {}, byCls = {}, created = [];
-  IM.list.forEach(r => { const k = r.c + "|" + nk(r.name); if (r.sel === "skip") alias[k] = "skip"; else if (r.sel === "new") (byCls[r.c] = byCls[r.c] || []).push(r); else alias[k] = r.sel; });
+  const alias = {}, byCls = {}, created = [], restores = [];
+  IM.list.forEach(r => { const k = r.c + "|" + nk(r.name); if (r.sel === "skip") alias[k] = "skip"; else if (r.sel === "new") (byCls[r.c] = byCls[r.c] || []).push(r); else if (r.sel.startsWith("arch:")) restores.push({ k, id: r.sel.slice(5) }); else alias[k] = r.sel; });
   try {
+    for (const q of restores) { const res = await api("POST", "/students/restore", { id: q.id }); upsertStu(res.student); S.arch = S.arch.filter(a => a.id !== q.id); alias[q.k] = res.student.id; }
     for (const [c, rs] of Object.entries(byCls)) { const res = await api("POST", "/students/add", { students: rs.map(r => ({ name: r.name, cls: c })) }); res.students.forEach((st, i) => { upsertStu(st); alias[c + "|" + nk(rs[i].name)] = st.id; if (res.created.includes(st.id)) created.push(st.id); }); }
     await impChapters(IM.wb, alias, created);
   } catch (x) { toast(x.message, true); }
@@ -1573,7 +1654,7 @@ A.impUndo = b => busy(b, async () => {
       await load([path], true); for (const part of chunk(ops, 150)) { await patch(path, part); done += part.length; }
     }
   } catch (x) { return toast("Stopped: " + x.message + " (" + done + " removed)", true); }
-  if ((last.stu || []).length) { try { await api("POST", "/students/remove", { ids: last.stu }); S.students = S.students.filter(x => !last.stu.includes(x.id)); } catch (x) { toast("Entries removed, but the new students stayed: " + x.message, true); } }
+  if ((last.stu || []).length) { try { await api("POST", "/students/remove", { ids: last.stu, purge: true }); S.students = S.students.filter(x => !last.stu.includes(x.id)); } catch (x) { toast("Entries removed, but the new students stayed: " + x.message, true); } }
   l.pop(); localStorage.impLog = JSON.stringify(l); $("impu").innerHTML = impUndoHTML(); toast("Import undone");
 });
 /* ===== app.js ===== */
@@ -1685,7 +1766,7 @@ function homeDraw(host) {
   subs.forEach(s => { const ch = (D[P.syl(cls, s)] || {}).chapters || [], n = Object.keys(((D[P.nb(cls, s)] || {}).entries || {})[T] || {}).length; if (ch.length && n < all.length) todo.push(["nb", "book", `${all.length - n} students pending notebook entry`, `${cls} ${s}`]); });
   if (inch && calls) todo.push(["cls", "phone", `${calls} parent calls to make`, "Class " + cls]);
   if (inch && fdef) todo.push(["cls", "coin", `${fdef} students with fees pending`, "Class " + cls]);
-  const cats = S.cfg.monitorCategories;
+  const cats = monCats(cls);
   host.innerHTML = `${cs.length > 1 ? `<div class="row chips">${cs.map(c => `<button class="chip ${c === cls ? "on" : ""}" data-a="hCls" data-c="${esc(c)}">Class ${esc(c)}</button>`).join("")}</div>` : ""}
    <div class="hero"><div class="stats">${cards}</div>
    <div class="card statc"><h3>Statistics</h3><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="6"/><circle cx="60" cy="60" r="52" fill="none" stroke="var(--deep)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${C2 * ring / 100} ${C2}" transform="rotate(-90 60 60)"/></svg><div class="rc2">${ic("cap", 34)}</div></div>${cov.map(c => `<div class="hb2"><div class="row between"><small>${c[0]}</small><b>${Math.round(c[1])}%</b></div><div class="bar"><i style="width:${c[1]}%"></i></div></div>`).join("")}</div></div>
@@ -1706,7 +1787,22 @@ function refreshView() {
   else if (cur === "marks" && M.path && $("m-ls")) { const b = JSON.stringify(D[M.path]); load([M.path], true).then(() => { if (ok() && JSON.stringify(D[M.path]) !== b) entryDraw("m"); }).catch(() => { }); }
   else if (cur === "nb" && N.ep && $("n-ls")) { const b = JSON.stringify(D[N.ep]); load([N.ep], true).then(() => { if (ok() && JSON.stringify(D[N.ep]) !== b) entryDraw("n"); }).catch(() => { }); }
 }
-setInterval(refreshView, 25000); document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshView(); });
+setInterval(refreshView, 60000); document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshView(); });
+
+/* ----- admin student screen: same instant add / edit / archive as the class incharge ----- */
+A.sSave = b => {
+  const name = $("sn").value.trim(), roll = $("sr").value.trim(), cls = $("sc").value, id = b.dataset.id; if (!name) return $("e2").textContent = "Enter a name.";
+  const old = id && stuById(id);
+  if (old && old.cls !== cls) {                                    // moving to another class rewrites the list (records stay with the old class)
+    return busy(b, async () => { try { await saveStudents(S.students.map(s => s.id === id ? { id, name, cls, roll: roll || undefined } : s)); } catch (x) { return $("e2").textContent = x.message; } AD.cls = cls; closeSheet(true); adStudents($("adb")); });
+  }
+  if (old) { stuUpdQ(id, name, roll); return closeSheet(true); }
+  const ar = S.arch.find(a => a.cls === cls && nk(a.name) === nk(name));
+  if (ar && confirm(`“${ar.name}” is in the archive. Restore them with all their earlier records?\n\nOK = restore, Cancel = add as a brand-new student.`)) { AD.cls = cls; stuRestoreQ(ar.id, ar.name); return closeSheet(true); }
+  if (classStudents(cls).some(s => nk(s.name) === nk(name))) return $("e2").textContent = "That student is already in the class.";
+  AD.cls = cls; stuAddQ([{ name, cls, roll }]); closeSheet(true);
+};
+A.sDel = b => { const s = stuById(b.dataset.id); if (!s || !confirm(`Remove ${s.name}? They move to the Archive with all their records and can be restored later.`)) return; stuArchiveQ([s.id]); };
 
 /* ----- boot ----- */
 renderAcct(); drawPad(); document.querySelector(".gi").innerHTML = ic("search", 18);
