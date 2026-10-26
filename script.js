@@ -29,6 +29,7 @@ const IC = {
   print: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'
 };
 Object.assign(IC, {
+  pen: '<path d="M4 20l4-1 11-11-3-3L5 16z"/><path d="M14 7l3 3"/>',
   moon: '<path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/>',
   swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>', plus: '<path d="M12 5v14M5 12h14"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>', chevr: '<path d="M9 6l6 6-6 6"/>',
   backspace: '<path d="M20 5H9l-6 7 6 7h11a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z"/><path d="M13 10l4 4M17 10l-4 4"/>' });
@@ -149,7 +150,7 @@ function conflictSheet(title, theirs, mine, keepAct, mineAct, extra) {
 /* ---------- bottom sheet (entry card) with unsaved-change guard ---------- */
 let dirty = false;
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
-function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
+function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
 const sheetL = h => { sheet(h); $("sheet").oninput = null; };
 function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); $("sheet").classList.add("hide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
@@ -539,7 +540,8 @@ const TM = { tab: "enter", cls: "", term: "", c: "", s: "", opt: (() => { try { 
 const TCOL = { Teal: "#0b4a4a", Blue: "#1f4e8c", Maroon: "#7a1f2b", Black: "#222222" };
 const sigList = () => S.cfg.signatories && S.cfg.signatories.length ? S.cfg.signatories : ["Class teacher", "Examination in-charge", "Principal"];
 const sgBoxes = (id, sel, change) => `<div class="xsets" id="${id}">${sigList().map(t => `<label class="cb"><input type="checkbox" ${change ? 'data-c="tOptCh"' : ""} value="${esc(t)}" ${sel.includes(t) ? "checked" : ""}> ${esc(t)}</label>`).join("")}</div>`;
-const sigRow = (list, parent) => `<div class="sig">${list.filter(Boolean).map(t => `<span>${/^class teacher$/i.test(t) && S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}${esc(t)}</span>`).join("")}${parent ? `<span>Parent</span>` : ""}</div>`;
+const sgOne = (t, img) => `<div class="sgc"><div class="sgbox">${img ? `<img src="${img}" alt="">` : ""}</div><div class="sgt">${esc(t)}</div></div>`;
+const sigRow = (list, parent) => `<div class="sig">${list.filter(Boolean).map(t => sgOne(t, /^class teacher$/i.test(t) && S.sig)).join("")}${parent ? sgOne("Parent") : ""}</div>`;
 const tTid = term => "term_" + termKey(term);
 const tOpt = () => Object.assign({ title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, cn: 6, csg: ["Class teacher"], clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
 function tReadOpt() {
@@ -644,7 +646,7 @@ function miniCard(cls, term, r, d, o, col) {
    <div class="mcn"><b>${esc(r.s.name)}</b><span>Class ${esc(cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</span></div>
    <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.m}</td><td>${c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
    <div class="mcr">${o.crank && r.rank ? `Rank ${r.rank} ` : ""}${o.cres ? `<b class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</b>` : ""}</div>${o.cremark ? `<div class="mcl">Remarks:</div>` : ""}
-   <div class="sig2">${(o.csg || ["Class teacher"]).map(t => `<span>${/^class teacher$/i.test(t) && S.sig ? `<img src="${S.sig}" alt="">` : ""}${esc(t)}</span>`).join("")}${o.cpar ? `<span>Parent</span>` : ""}</div></div>`;
+   <div class="sig2">${(o.csg || ["Class teacher"]).map(t => sgOne(t, /^class teacher$/i.test(t) && S.sig)).join("")}${o.cpar ? sgOne("Parent") : ""}</div></div>`;
 }
 A.tCardsGo = () => {
   const o = tReadOpt(), d = tData(TM.cls, TM.term); if (!d.cols.length) return $("terr").textContent = "No " + TM.term + " marks entered for this class yet.";
@@ -773,12 +775,12 @@ function imgPick(max, cb) {
   };
   i.click();
 }
-const sigSend = async img => { try { await api("POST", "/sig", { img }); S.sig = img; localStorage["sig_" + S.me.username] = img; toast(img ? "Signature saved" : "Signature removed"); A.profile(); } catch (x) { toast(x.message, true); } };
+const sigSend = async img => { try { await api("POST", "/sig", { img }); S.sig = img; localStorage["sig_" + S.me.username] = img; toast(img ? "Signature saved" : "Signature removed"); A.sigScreen(); } catch (x) { toast(x.message, true); } };
 A.sigUp = () => imgPick(400, sigSend);
 A.sigDel = () => sigSend("");
 let SG = { drew: false, last: null };
 A.sigDraw = () => {
-  sheetL(`<h2>Draw your signature</h2><p class="sub">Sign inside the box with your finger or pen.</p><canvas id="sgc" class="sgc" width="640" height="240"></canvas><p></p><div class="row"><button class="btn" data-a="sigSave" style="flex:2">Save</button><button class="btn alt" data-a="sigClr">Clear</button><button class="btn alt" data-a="profile">Back</button></div>`);
+  sheetL(`<h2>Draw your signature</h2><p class="sub">Sign inside the box with your finger or pen.</p><canvas id="sgc" class="sgc" width="640" height="240"></canvas><p></p><div class="row"><button class="btn" data-a="sigSave" style="flex:2">Save</button><button class="btn alt" data-a="sigClr">Clear</button><button class="btn alt" data-a="sigScreen">Back</button></div>`);
   const c = $("sgc"), g = c.getContext("2d"); SG = { drew: false, last: null }; g.lineWidth = 4; g.lineCap = "round"; g.lineJoin = "round"; g.strokeStyle = "#0b1f3a";
   const pt = e => { const r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; };
   c.onpointerdown = e => { c.setPointerCapture(e.pointerId); SG.last = pt(e); g.beginPath(); g.moveTo(...SG.last); g.lineTo(SG.last[0] + .1, SG.last[1]); g.stroke(); SG.drew = true; };
@@ -1277,7 +1279,8 @@ function iReports(host) {
   host.innerHTML = `<div class="card"><h3>Print or save as PDF</h3><p class="sub">Opens the print dialog. Choose "Save as PDF" to keep a copy.</p><div class="row"><button class="btn" data-a="repSheet">Class marks sheet</button><button class="btn" data-a="repCards">Report cards (whole class)</button>${inch ? `<button class="btn" data-a="repDef">Defaulters list</button>` : ""}</div></div>`;
   host.insertAdjacentHTML("beforeend", prHTML() + exportHTML() + importHTML()); prInit(); xPer(); xScopeDraw(); impHistLoad();
 }
-function printHTML(html, css) { $("print").innerHTML = (css ? `<style>${css}</style>` : "") + html; setTimeout(() => print(), 50); }
+function printHTML(html, css) { if (css && /Android/i.test(navigator.userAgent)) { if (/landscape/.test(css)) toast("Tip: choose Landscape in the print screen for this wide sheet."); css = css.replace(/size:[^;}]*;?/, ""); }
+  $("print").innerHTML = (css ? `<style>${css}</style>` : "") + html; setTimeout(() => print(), 50); }
 const rhead = (t, logo = 1) => `<div class="rh">${logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<b>${esc(S.cfg.school)}</b><span>${esc(t)} · ${fmtD(today())}</span></div>`;
 A.repSheet = () => {
   const st = stats(I.cls), subs = subjectsOf(I.cls);
@@ -1769,7 +1772,17 @@ function renderAcct() {
 A.lgSwitch = () => { sw = true; pin = ""; drawPad(); renderAcct(); };
 A.lgPick = b => { sel = b.dataset.u; sw = false; pin = ""; renderAcct(); drawPad(); };
 A.lgOther = () => { sel = ""; $("login").classList.remove("pick"); $("acct").innerHTML = ""; $("user").classList.remove("hide"); $("user").focus(); };
-const drawPad = () => $("dots").innerHTML = pin.length ? [...pin].map(() => `<i class="f"></i>`).join("") : `<span class="phint">Enter your PIN</span>`;
+/* PIN dots: the first digit pops in; every next digit slides the dots left while a new one pops in */
+let dotEls = [];
+function drawPad() {
+  const box = $("dots"), n = pin.length;
+  if (!n) { dotEls = []; box.innerHTML = `<span class="phint">Enter your PIN</span>`; return; }
+  const first = dotEls.map(d => d.getBoundingClientRect().left);
+  if (!dotEls.length) box.innerHTML = "";
+  while (dotEls.length < n) { const i = document.createElement("i"); i.className = "f pop"; box.appendChild(i); dotEls.push(i); }
+  while (dotEls.length > n) dotEls.pop().remove();
+  dotEls.forEach((d, k) => { if (k >= first.length) return; const dx = first[k] - d.getBoundingClientRect().left; if (Math.abs(dx) < .5) return; d.style.transition = "none"; d.style.transform = `translateX(${dx}px)`; d.getBoundingClientRect(); d.style.transition = ""; d.style.transform = ""; });
+}
 $("pad").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, "⌫", 0, "Go"].map(k => `<button data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k === "Go" ? "Sign in" : k}">${k === "⌫" ? ic("backspace", 24) : k === "Go" ? ic("arrow", 26) : k}</button>`).join("");
 drawPad();
 async function doLogin() {
@@ -1813,12 +1826,13 @@ $("gq").oninput = e => {
 A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.dataset.id); };
 
 /* ----- profile ----- */
+/* ----- profile: avatar, name, username + role, theme, signature screen, PIN ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
-  <h3>Change PIN</h3><div class="row"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN"></div>
-  <h3 style="margin-top:18px">Appearance</h3><div class="row"><button class="btn alt sm" data-a="theme">${ic("moon", 16)} Theme &amp; night mode</button></div>
-  <h3 style="margin-top:18px">My signature</h3><p class="sub">Printed on report cards and mark sheets.</p><div class="sgprev">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div>
+  <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Theme &amp; night mode</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button></div>
+  <h3 style="margin-top:18px">Change PIN</h3><div class="form"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN" autocomplete="current-password"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN" autocomplete="new-password"><input id="np2" type="password" inputmode="numeric" maxlength="6" placeholder="Repeat new PIN" aria-label="Repeat new PIN" autocomplete="new-password"></div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
-A.pinSave = b => busy(b, async () => { try { await api("POST", "/pin/change", { oldPin: $("op").value, newPin: $("np").value }); closeSheet(true); toast("PIN changed"); } catch (x) { $("e2").textContent = x.message; } });
+A.sigScreen = () => sheetL(`<h2>My signature</h2><p class="sub">Printed on mark sheets and report cards wherever “Class teacher” is ticked.</p><div class="sgprev">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
+A.pinSave = b => busy(b, async () => { if ($("np").value !== $("np2").value) return $("e2").textContent = "The two new PINs do not match."; try { await api("POST", "/pin/change", { oldPin: $("op").value, newPin: $("np").value }); closeSheet(true); toast("PIN changed"); } catch (x) { $("e2").textContent = x.message; } });
 
 /* ----- right panel (profile + this week's monitors over the school skyline) ----- */
 const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8a7a"/><stop offset="1" stop-color="#0b4a4a"/></linearGradient></defs>
@@ -1905,4 +1919,3 @@ A.sDel = b => { const s = stuById(b.dataset.id); if (!s || !confirm(`Remove ${s.
 renderAcct(); drawPad(); document.querySelector(".gi").innerHTML = ic("search", 18);
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => { });
 if (token) api("GET", "/me").then(r => { S.me = r; return start(); }).catch(() => { });
-
