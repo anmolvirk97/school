@@ -28,6 +28,9 @@ const IC = {
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
   print: '<polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>'
 };
+Object.assign(IC, {
+  swap: '<path d="M7 7h12l-3-3M17 17H5l3 3"/>', plus: '<path d="M12 5v14M5 12h14"/>', arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>', chevr: '<path d="M9 6l6 6-6 6"/>',
+  backspace: '<path d="M20 5H9l-6 7 6 7h11a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1z"/><path d="M13 10l4 4M17 10l-4 4"/>' });
 const ic = (n, s = 22) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[n] || ""}</svg>`;
 
 /* ---------- small helpers ---------- */
@@ -281,7 +284,7 @@ const feeRec = (cls, term, sid) => getAt(FD("fees", cls), [termKey(term), sid]);
 const feePaid = r => r ? (r.pays || []).reduce((n, p) => n + p.a, 0) : 0;
 const feeLeft = r => r ? Math.max(0, r.due - feePaid(r)) : 0;
 const callsOf = (cls, sid) => Object.entries(FD("calls", cls).items || {}).map(([id, c]) => Object.assign({ id }, c)).filter(c => !sid || c.sid === sid).sort((a, b) => b.date.localeCompare(a.date));
-const calledThisWeek = (cls, sid) => callsOf(cls, sid).some(c => c.date >= weekStart());
+const calledThisWeek = (cls, sid, kind = "fb") => callsOf(cls, sid).some(c => c.date >= weekStart() && (c.kind === "fee" ? "fee" : "fb") === kind);
 const weekIdx = d => Math.floor((d.getTime() / 864e5 + 3) / 7);
 
 /* ===== modules.js ===== */
@@ -533,13 +536,17 @@ A.nMine = b => busy(b, async () => {
 /* ===== Term exams: subject-wise entry, custom mark sheet, mini report cards ===== */
 const TM = { tab: "enter", cls: "", term: "", c: "", s: "", opt: (() => { try { return JSON.parse(localStorage.tmOpt || "{}"); } catch { return {}; } })() };
 const TCOL = { Teal: "#0b4a4a", Blue: "#1f4e8c", Maroon: "#7a1f2b", Black: "#222222" };
+const sigList = () => S.cfg.signatories && S.cfg.signatories.length ? S.cfg.signatories : ["Class teacher", "Examination in-charge", "Principal"];
+const sgBoxes = (id, sel, change) => `<div class="xsets" id="${id}">${sigList().map(t => `<label class="cb"><input type="checkbox" ${change ? 'data-c="tOptCh"' : ""} value="${esc(t)}" ${sel.includes(t) ? "checked" : ""}> ${esc(t)}</label>`).join("")}</div>`;
+const sigRow = (list, parent) => `<div class="sig">${list.filter(Boolean).map(t => `<span>${/^class teacher$/i.test(t) && S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}${esc(t)}</span>`).join("")}${parent ? `<span>Parent</span>` : ""}</div>`;
 const tTid = term => "term_" + termKey(term);
-const tOpt = () => Object.assign({ title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, sig: 1, cn: 6, clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
+const tOpt = () => Object.assign({ title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, cn: 6, csg: ["Class teacher"], clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
 function tReadOpt() {
   const o = tOpt(), v = id => $(id) ? $(id).value : null;
   if (v("to-title") != null) { o.title = v("to-title").trim() || "Mark Sheet"; o.or = v("to-or"); o.col = v("to-col"); }
   if (v("to-n") != null) o.cn = +v("to-n");
   document.querySelectorAll("#tchk input, #tcchk input").forEach(i => o[i.value] = i.checked ? 1 : 0);
+  if ($("tsg")) o.sg = [...document.querySelectorAll("#tsg input:checked")].map(i => i.value); if ($("tcsg")) o.csg = [...document.querySelectorAll("#tcsg input:checked")].map(i => i.value);
   TM.opt = o; try { localStorage.tmOpt = JSON.stringify(o); } catch { } return o;
 }
 V.term = host => {
@@ -605,8 +612,8 @@ async function tSheet(host) {
   const cs = myClasses(); if (!cs.includes(TM.cls)) TM.cls = cs[0]; const o = tOpt();
   host.innerHTML = `<div class="card"><div class="row"><select id="tcl" data-c="tClsCh" aria-label="Class">${cs.map(c => `<option ${c === TM.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${termSel()}</div><p class="sub">Columns are the subjects you can access in this class.</p>
    <h4>Design</h4><div class="form"><label>Title<input id="to-title" data-c="tOptCh" value="${esc(o.title)}" placeholder="Mark Sheet"></label><div class="row"><select id="to-or" data-c="tOptCh" aria-label="Page"><option value="landscape" ${o.or === "landscape" ? "selected" : ""}>Landscape A4</option><option value="portrait" ${o.or === "portrait" ? "selected" : ""}>Portrait A4</option></select><select id="to-col" data-c="tOptCh" aria-label="Colour">${Object.keys(TCOL).map(k => `<option ${o.col === k ? "selected" : ""}>${k}</option>`).join("")}</select></div></div>
-   <div class="xsets" id="tchk">${[["logo", "School logo"], ["roll", "Serial no."], ["max", "Max marks under subject names"], ["tot", "Total"], ["pct", "Percentage"], ["rank", "Rank"], ["res", "Result"], ["sig", "Signature lines"]].map(([k, v]) => `<label class="cb"><input type="checkbox" data-c="tOptCh" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
-   <button class="btn" data-a="tPrint">${ic("print", 18)} Print / save PDF</button><div class="err" id="terr"></div></div><div id="tprev"></div>`;
+   <div class="xsets" id="tchk">${[["logo", "School logo"], ["roll", "Serial no."], ["max", "Max marks under subject names"], ["tot", "Total"], ["pct", "Percentage"], ["rank", "Rank"], ["res", "Result"]].map(([k, v]) => `<label class="cb"><input type="checkbox" data-c="tOptCh" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
+   <h4>Signatures</h4>${sgBoxes("tsg", o.sg || sigList(), true)}<p></p><button class="btn" data-a="tPrint">${ic("print", 18)} Print / save PDF</button><div class="err" id="terr"></div></div><div id="tprev"></div>`;
   const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { return $("terr").textContent = e.message; }
   if (!stale(t) && $("tprev")) tPrev();
 }
@@ -618,7 +625,7 @@ function tSheetHTML(cls, term, o) {
    <table class="pt mst"><tr>${o.roll ? "<th>#</th>" : ""}<th>Student</th>${d.cols.map(c => `<th>${esc(c.sub)}${o.max ? `<br><small>/${c.t.max}</small>` : ""}</th>`).join("")}${o.tot ? "<th>Total</th>" : ""}${o.pct ? "<th>%</th>" : ""}${o.rank ? "<th>Rank</th>" : ""}${o.res ? "<th>Result</th>" : ""}</tr>
    ${d.rows.map((r, i) => `<tr>${o.roll ? `<td>${i + 1}</td>` : ""}<td>${esc(r.s.name)}</td>${r.cells.map(e => `<td>${!e ? "" : e.ab ? "Ab" : e.m}</td>`).join("")}${o.tot ? `<td>${r.n ? r.tot + "/" + r.mx : ""}</td>` : ""}${o.pct ? `<td>${fmt1(r.pct)}</td>` : ""}${o.rank ? `<td>${r.rank || ""}</td>` : ""}${o.res ? `<td class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</td>` : ""}</tr>`).join("")}
    <tr class="avr"><td${o.roll ? ' colspan="2"' : ""}><b>Class average</b></td>${d.cols.map((c, i) => `<td>${fmt1(avgOf(i))}</td>`).join("")}${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0) ? `<td colspan="${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0)}"></td>` : ""}</tr></table>
-   ${o.sig ? `<div class="sig"><span>${S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}Class teacher</span><span>Examination in-charge</span><span>Principal</span></div>` : ""}</div>`;
+   ${sigRow(o.sg || sigList())}</div>`;
 }
 A.tPrint = () => { const o = tReadOpt(), h = tSheetHTML(TM.cls, TM.term, o); if (!h) return $("terr").textContent = "No marks to print for this term yet."; printHTML(h, `@page{size:A4 ${o.or};margin:10mm}`); };
 
@@ -627,8 +634,8 @@ async function tCards(host) {
   const cs = inchargeClasses(); if (!cs.length) return host.innerHTML = noAccess("Mini report cards need every subject's marks, so they are available to the class incharge.");
   if (!cs.includes(TM.cls)) TM.cls = cs[0]; const o = tOpt();
   host.innerHTML = `<div class="card"><div class="row"><select id="tcl" data-c="tClsCh" aria-label="Class">${cs.map(c => `<option ${c === TM.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${termSel()}<select id="to-n" aria-label="Cards per page">${[4, 6, 8].map(n => `<option value="${n}" ${o.cn === n ? "selected" : ""}>${n} per A4 page</option>`).join("")}</select></div>
-   <div class="xsets" id="tcchk">${[["clogo", "School logo"], ["crank", "Rank"], ["cres", "Result (pass / fail)"], ["cremark", "Blank remarks line"], ["csig", "My signature (class teacher)"], ["cpar", "Parent signature line"]].map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
-   <button class="btn" data-a="tCardsGo">${ic("print", 18)} Print cards</button><div class="err" id="terr"></div></div>`;
+   <div class="xsets" id="tcchk">${[["clogo", "School logo"], ["crank", "Rank"], ["cres", "Result (pass / fail)"], ["cremark", "Blank remarks line"], ["cpar", "Parent signature line"]].map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
+   <h4>Signatures</h4>${sgBoxes("tcsg", o.csg || ["Class teacher"], false)}<p></p><button class="btn" data-a="tCardsGo">${ic("print", 18)} Print cards</button><div class="err" id="terr"></div></div>`;
   const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { $("terr").textContent = e.message; }
 }
 function miniCard(cls, term, r, d, o, col) {
@@ -636,7 +643,7 @@ function miniCard(cls, term, r, d, o, col) {
    <div class="mcn"><b>${esc(r.s.name)}</b><span>Class ${esc(cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</span></div>
    <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.m}</td><td>${c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
    <div class="mcr">${o.crank && r.rank ? `Rank ${r.rank} ` : ""}${o.cres ? `<b class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</b>` : ""}</div>${o.cremark ? `<div class="mcl">Remarks:</div>` : ""}
-   <div class="sig2"><span>${o.csig && S.sig ? `<img src="${S.sig}" alt="">` : ""}Class teacher</span>${o.cpar ? `<span>Parent</span>` : ""}</div></div>`;
+   <div class="sig2">${(o.csg || ["Class teacher"]).map(t => `<span>${/^class teacher$/i.test(t) && S.sig ? `<img src="${S.sig}" alt="">` : ""}${esc(t)}</span>`).join("")}${o.cpar ? `<span>Parent</span>` : ""}</div></div>`;
 }
 A.tCardsGo = () => {
   const o = tReadOpt(), d = tData(TM.cls, TM.term); if (!d.cols.length) return $("terr").textContent = "No " + TM.term + " marks entered for this class yet.";
@@ -715,7 +722,7 @@ A.prGo = b => busy(b, async () => {
     }
     if (inch && cats.includes("cl")) {
       const cl = callsOf(c).filter(x => inR(x.date)).sort((a, z) => a.date.localeCompare(z.date)), uniq = new Set(cl.map(x => x.sid)).size, by = {}; cl.forEach(x => by[x.resp] = (by[x.resp] || 0) + 1);
-      sec.push(`<h3>Parent calls record</h3><p class="sub">${cl.length} calls · ${uniq} of ${stu.length} parents contacted (${stu.length ? Math.round(uniq / stu.length * 100) : 0}%)${Object.keys(by).length ? " · " + Object.entries(by).map(([k, v]) => `${esc(k)}: ${v}`).join(", ") : ""}</p>` + tbl(["Date", "Student", "Parent's response", "Remark", "Called by"], cl.map(x => { const s = stuById(x.sid); return tr([fmtD(x.date), esc(s ? s.name : "?"), esc(x.resp), esc(x.r || ""), esc(x.by || "")]); })));
+      sec.push(`<h3>Parent calls record</h3><p class="sub">${cl.length} calls (${cl.filter(x => callKind(x) === "fee").length} fee, ${cl.filter(x => callKind(x) !== "fee").length} feedback) · grievances: ${cl.filter(x => x.gr && !x.grs).length} open, ${cl.filter(x => x.gr && x.grs).length} resolved · ${uniq} of ${stu.length} parents contacted (${stu.length ? Math.round(uniq / stu.length * 100) : 0}%)${Object.keys(by).length ? " · " + Object.entries(by).map(([k, v]) => `${esc(k)}: ${v}`).join(", ") : ""}</p>` + tbl(["Date", "Student", "Type", "Parent's response", "Remark / grievance", "Called by"], cl.map(x => { const s = stuById(x.sid); return tr([fmtD(x.date), esc(s ? s.name : "?"), callKind(x) === "fee" ? "Fee" : "Feedback", esc(callTxt(x).replace(/^Fee call · /, "")), esc(x.r || "") + (x.gr ? `${x.r ? "<br>" : ""}<b>Grievance (${x.grs ? "resolved " + fmtD(x.grd) : "open"}):</b> ${esc(x.gr)}${x.grn ? " — " + esc(x.grn) : ""}` : ""), esc(x.by || "")]); })));
     }
     if (inch && cats.includes("cr")) {
       const months = Object.keys(FD("attendance", c)).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from), y = ayStart(rg.to), callsIn = callsOf(c).filter(x => inR(x.date));
@@ -879,12 +886,12 @@ A.monSet = b => {
 const mcRow = v => `<div class="mcrow"><input class="mcn" value="${esc(v)}" placeholder="Category name (e.g. Discipline)" maxlength="24" aria-label="Category name"><button class="link" data-a="mcDel" aria-label="Remove category">✕</button></div>`;
 A.monCats = () => {
   const cats = monCats(C.cls);
-  sheet(`<h2>Monitor categories · ${esc(C.cls)}</h2><p class="sub">These are for your class only. The weekly rotation uses this list. Renaming a category starts it fresh (earlier overrides for the old name are not carried over).</p><div id="mcl" class="mcl">${(cats.length ? cats : [""]).map(mcRow).join("")}</div><p><button class="btn alt sm" data-a="mcAdd">Add category</button></p><div class="row"><button class="btn" data-a="mcSave" style="flex:2">Save</button><button class="btn alt" data-a="mcDefault">Use school default</button></div><p></p><button class="btn alt" data-a="close">Cancel</button><div class="err" id="e2"></div>`);
+  sheet(`<h2>Monitor categories · ${esc(C.cls)}</h2><p class="sub">These are for your class only. The weekly rotation uses this list. Renaming a category starts it fresh (earlier overrides for the old name are not carried over).</p><div id="mclist" class="mclist">${(cats.length ? cats : [""]).map(mcRow).join("")}</div><p><button class="btn alt sm" data-a="mcAdd">Add category</button></p><div class="row"><button class="btn" data-a="mcSave" style="flex:2">Save</button><button class="btn alt" data-a="mcDefault">Use school default</button></div><p></p><button class="btn alt" data-a="close">Cancel</button><div class="err" id="e2"></div>`);
 };
-A.mcAdd = () => { $("mcl").insertAdjacentHTML("beforeend", mcRow("")); dirty = true; $("mcl").lastElementChild.querySelector("input").focus(); };
+A.mcAdd = () => { $("mclist").insertAdjacentHTML("beforeend", mcRow("")); dirty = true; $("mclist").lastElementChild.querySelector("input").focus(); };
 A.mcDel = b => { b.closest(".mcrow").remove(); dirty = true; };
 A.mcSave = () => {
-  const list = [...document.querySelectorAll("#mcl .mcn")].map(i => i.value.replace(/\s+/g, " ").trim()).filter(Boolean);
+  const list = [...document.querySelectorAll("#mclist .mcn")].map(i => i.value.replace(/\s+/g, " ").trim()).filter(Boolean);
   if (new Set(list.map(x => x.toLowerCase())).size !== list.length) return $("e2").textContent = "Two categories have the same name.";
   if (list.length > 12) return $("e2").textContent = "Use at most 12 categories.";
   const cls = C.cls; patchQ(P.k("monitors", cls), [{ k: "cats", v: list.length ? list : null }], e => { toast("Categories were not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
@@ -919,35 +926,81 @@ A.fPay = b => {
   fOpen(b.dataset.s); cFine($("cbody"));
 };
 
-/* ----- parent calls ----- */
+/* ----- parent calls: feedback calls (with optional grievances) and fee calls ----- */
+const FEE_RESP = ["Already paid", "Will deposit until", "Special payment plan", "Will talk to MD sir"];
+const callKind = c => c.kind === "fee" ? "fee" : "fb";
+const callsOfKind = (cls, kind, sid) => callsOf(cls, sid).filter(c => callKind(c) === kind);
+const callTxt = c => (callKind(c) === "fee" ? "Fee call · " : "") + c.resp + (c.until ? " " + fmtD(c.until) : "");
+const grBadge = c => c.gr ? (c.grs ? ` <span class="pill ok">grievance resolved</span>` : ` <span class="pill bad">grievance open</span>`) : "";
 function cCall(host) {
-  const st = stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id)), all = classStudents(C.cls), cov = all.filter(s => calledThisWeek(C.cls, s.id)).length;
-  host.innerHTML = `<div class="card"><b>Calls to make</b><p class="sub">Students with 2+ notebook chapters pending or low / falling marks, not called this week.</p><div class="row chips">${st.length ? st.map(r => `<button class="chip bad" data-a="cPick" data-id="${esc(r.s.id)}">${esc(r.s.name)} <small>${esc(r.risk[0])}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`}</div><p class="sub">Coverage this week: ${cov}/${all.length} parents called.</p></div>
+  const k = C.ck = C.ck || "fb", all = classStudents(C.cls), y = ayStart();
+  const todo = k === "fb" ? stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id, "fb")).map(r => ({ s: r.s, note: r.risk[0] }))
+    : all.filter(s => fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee")).map(s => ({ s, note: fyM(fyCalc(C.cls, y, s.id).owedM) + " due" }));
+  const cov = all.filter(s => calledThisWeek(C.cls, s.id, k)).length, open = callsOf(C.cls).filter(c => c.gr && !c.grs && stuById(c.sid));
+  host.innerHTML = `<div class="seg" id="cks"><button class="${k === "fb" ? "on" : ""}" data-a="cKind" data-k="fb">Feedback calls</button><button class="${k === "fee" ? "on" : ""}" data-a="cKind" data-k="fee">Fee calls</button></div>
+   ${open.length ? `<div class="card"><div class="row between"><b>Open grievances</b><span class="pill bad">${open.length}</span></div>${open.map(c => `<div class="lrow"><div class="lm"><b>${esc(stuById(c.sid).name)}</b><small>${fmtD(c.date)} · ${esc(c.gr)}</small></div><button class="btn alt sm" data-a="grRes" data-id="${esc(c.id)}">Resolve</button></div>`).join("")}</div>` : ""}
+   <div class="card"><b>Calls to make</b><p class="sub">${k === "fb" ? "Students with 2+ notebook chapters pending or low / falling marks, not called this week." : "Students whose fee months are pending, not called this week."}</p><div class="row chips">${todo.length ? todo.map(t => `<button class="chip bad" data-a="cPick" data-id="${esc(t.s.id)}">${esc(t.s.name)} <small>${esc(t.note)}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`}</div><p class="sub">${k === "fb" ? "Feedback" : "Fee"} calls this week: ${cov}/${all.length} parents called.</p></div>
    <div class="card"><div class="row mid"><label class="fl">Date for the calls you enter<input id="cdd" type="date" value="${C.callDate || today()}" data-c="cDate"></label><p class="sub" style="flex:2;margin:0;min-width:180px">Set it once: every call you log below uses this date.</p></div></div><div id="cent"></div><div id="clog"></div>`;
-  entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${fmtD(c.date)} · ${esc(c.resp)}` : ""; }, pick: callOpen });
+  entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id, k), tail: s => { const c = callsOfKind(C.cls, k, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: callOpen });
   logDraw("calls");
+  const on = $("cks") && $("cks").querySelector(".on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "center" });
 }
+A.cKind = b => { C.ck = b.dataset.k; LG.calls = null; cCall($("cbody")); };
 A.cDate = b => { C.callDate = b.value || today(); };
 A.cPick = b => callOpen(b.dataset.id);
+A.cRespCh = b => { const w = $("cuw"); if (w) w.classList.toggle("hide", b.value !== "Will deposit until"); };
+A.cGrCh = b => { $("cgt").classList.toggle("hide", !b.checked); const w = $("grsw"); if (w) w.classList.toggle("hide", !b.checked); };
 function callOpen(id) {
-  const s = stuById(id), h = callsOf(C.cls, id).slice(0, 3), r = stats(C.cls).rows.find(x => x.s.id === id);
-  sheet(`<h2>${esc(s.name)}</h2>${r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : ""}${h.length ? `<div class="hist">${h.map(c => `<div class="hr"><span>${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("")}</div>` : ""}
-   <div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cr" aria-label="Parent's response">${RESP.map(x => `<option>${x}</option>`).join("")}</select></div><p><input id="cn" placeholder="Remark (optional)" style="width:100%"></p>
-   <div class="row"><button class="btn" data-a="cSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="cSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
+  const k = C.ck || "fb", fee = k === "fee", s = stuById(id), h = callsOfKind(C.cls, k, id).slice(0, 3), y = ayStart(), fc = fyCalc(C.cls, y, id);
+  const r = fee ? null : stats(C.cls).rows.find(x => x.s.id === id), wk = new Date(Date.now() + 7 * 864e5);
+  sheet(`<h2>${esc(s.name)} <small>${fee ? "Fee call" : "Feedback call"}</small></h2>${fee ? (fc.r ? `<p>${pill(fyText(C.cls, y, id))} ${fc.owedM > 0 ? pill(fyM(fc.owedM) + " due", "bad") : ""}${fc.bal != null ? " " + pill("₹" + fc.bal + " yearly due") : ""}</p>` : `<p class="sub">No fee record for ${fyLab(y)} yet.</p>`) : (r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : "")}
+   ${h.length ? `<div class="hist">${h.map(c => `<div class="hr"><span>${esc(fmtD(c.date))} · ${esc(callTxt(c))}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("")}</div>` : ""}
+   <div class="form"><div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cr" data-c="cRespCh" aria-label="Parent's response">${(fee ? FEE_RESP : RESP).map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
+   ${fee ? `<div id="cuw" class="hide"><label>Will deposit until<input id="cu" type="date" value="${ymd(wk)}"></label></div>` : ""}
+   <input id="cn" placeholder="Remark (optional)">
+   ${fee ? "" : `<label class="cb"><input type="checkbox" id="cg" data-c="cGrCh"> Record a grievance</label><textarea id="cgt" class="hide" rows="3" placeholder="What is the parent's grievance?"></textarea>`}</div>
+   <p></p><div class="row"><button class="btn" data-a="cSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="cSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
 }
 A.cSkip = b => { if (!closeSheet()) return; const n = entryNext("c", b.dataset.id); if (n) callOpen(n.id); };
-A.cSave = b => busy(b, async () => {
-  const sid = b.dataset.id;
-  const cls = C.cls; patchQ(P.k("calls", cls), [{ k: "items." + uid("c"), v: { sid, date: $("cd").value, resp: $("cr").value, r: $("cn").value.trim(), by: S.me.name, t: Date.now() } }], e => { toast("A call was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
-  dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true); toast("Call logged");
-});
+A.cSave = b => {
+  const sid = b.dataset.id, fee = (C.ck || "fb") === "fee", resp = $("cr").value, v = { sid, date: $("cd").value, resp, r: $("cn").value.trim(), by: S.me.name, t: Date.now() };
+  if (!v.date) return $("e2").textContent = "Pick the call date.";
+  if (fee) { v.kind = "fee"; if (resp === "Will deposit until") { if (!$("cu").value) return $("e2").textContent = "Pick the date the parent will deposit by."; v.until = $("cu").value; } }
+  else if ($("cg").checked) { const g = $("cgt").value.trim(); if (!g) return $("e2").textContent = "Describe the grievance, or untick it."; v.gr = g; v.grs = 0; }
+  const cls = C.cls; patchQ(P.k("calls", cls), [{ k: "items." + uid("c"), v }], e => { toast("A call was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true); toast(v.gr ? "Call and grievance logged" : "Call logged");
+};
+/* grievances: mark resolved */
+A.grRes = b => {
+  const c = callsOf(C.cls).find(x => x.id === b.dataset.id); if (!c) return;
+  sheet(`<h2>Resolve grievance</h2><p class="sub"><b>${esc(stuById(c.sid).name)}</b> · ${esc(c.gr)}</p><div class="form"><input id="grn" placeholder="How was it resolved? (optional)" autofocus><label>Resolved on<input id="grd" type="date" value="${today()}"></label></div><p></p><div class="row"><button class="btn" data-a="grGo" data-id="${esc(c.id)}" style="flex:2">Mark resolved</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+};
+A.grGo = b => {
+  const id = b.dataset.id, note = $("grn").value.trim(), d = $("grd").value || today(), cls = C.cls;
+  patchQ(P.k("calls", cls), [{ k: `items.${id}.grs`, v: 1 }, { k: `items.${id}.grd`, v: d }, { k: `items.${id}.grn`, v: note || null }], e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  closeSheet(true); cCall($("cbody")); toast("Grievance marked resolved");
+};
+const callEditHTML = x => {
+  const fee = callKind(x) === "fee";
+  return `<div class="form"><div class="row"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"><select id="er" data-c="cRespCh" aria-label="Response">${(fee ? FEE_RESP : RESP).map(r => `<option ${r === x.resp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
+   ${fee ? `<div id="cuw" class="${x.resp === "Will deposit until" ? "" : "hide"}"><label>Will deposit until<input id="cu" type="date" value="${esc(x.until || "")}"></label></div>` : `<label class="cb"><input type="checkbox" id="cg" data-c="cGrCh" ${x.gr ? "checked" : ""}> Grievance</label><textarea id="cgt" rows="3" class="${x.gr ? "" : "hide"}" placeholder="Grievance">${esc(x.gr || "")}</textarea><label class="cb ${x.gr ? "" : "hide"}" id="grsw"><input type="checkbox" id="cgs" ${x.grs ? "checked" : ""}> Resolved</label>`}
+   <input id="en" placeholder="Remark" value="${esc(x.r || "")}"></div>`;
+};
+function callEditRead(rest) {
+  const fee = callKind(rest) === "fee", resp = $("er").value, v = Object.assign(rest, { date: $("ed").value, resp, r: $("en").value.trim(), t: Date.now() });
+  delete v.until;
+  if (fee) { if (resp === "Will deposit until") { if (!$("cu").value) return { err: "Pick the date the parent will deposit by." }; v.until = $("cu").value; } }
+  else { const on = $("cg").checked, g = $("cgt").value.trim(); if (on && !g) return { err: "Describe the grievance, or untick it." };
+    if (on) { v.gr = g; if ($("cgs").checked) { v.grs = 1; v.grd = v.grd || today(); } else { v.grs = 0; delete v.grd; delete v.grn; } } else { delete v.gr; delete v.grs; delete v.grd; delete v.grn; } }
+  return { v };
+}
 
 /* ----- log manager (calls + fines): edit, change dates and delete one or many ----- */
 let LG = {};
-const lgItems = k => (k === "calls" ? callsOf(C.cls) : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date))).filter(x => stuById(x.sid));
+const lgItems = k => (k === "calls" ? callsOfKind(C.cls, C.ck || "fb") : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date))).filter(x => stuById(x.sid));
 function logDraw(k) {
   const host = $(k === "calls" ? "clog" : "flog"); if (!host) return; const L = LG[k] = LG[k] || { sel: new Set(), n: 15, q: "" };
-  host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? "Call log" : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>
+  host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? ((C.ck || "fb") === "fee" ? "Fee call log" : "Feedback call log") : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>
    <div class="row tools"><button class="btn alt sm" data-a="lgAll" data-k="${k}">Select / clear all</button><button class="btn alt sm" data-a="lgDate" data-k="${k}">Change date</button>${k === "fines" ? `<button class="btn alt sm" data-a="lgPaid" data-k="fines">Mark paid</button>` : ""}<button class="btn alt sm" data-a="lgDel" data-k="${k}">Delete</button></div><small class="sub" id="lc-${k}"></small><div id="ll-${k}"></div></div>`;
   $("lq-" + k).oninput = e => { L.q = e.target.value.toLowerCase(); L.n = 15; logList(k); };
   logList(k);
@@ -955,7 +1008,7 @@ function logDraw(k) {
 function logList(k) {
   const L = LG[k], all = lgItems(k), ids = new Set(all.map(x => x.id)); L.sel.forEach(i => { if (!ids.has(i)) L.sel.delete(i); });
   const it = all.filter(x => { const s = stuById(x.sid); return !L.q || (s && s.name.toLowerCase().includes(L.q)); }), part = it.slice(0, L.n);
-  $("ll-" + k).innerHTML = part.map(x => { const s = stuById(x.sid); return `<div class="lrow"><label class="cb"><input type="checkbox" data-c="lgChk" data-k="${k}" data-id="${esc(x.id)}" ${L.sel.has(x.id) ? "checked" : ""} aria-label="Select"></label><div class="lm"><b>${esc(s ? s.name : "?")}</b><small>${fmtD(x.date)} · ${k === "calls" ? esc(x.resp) : esc(FTYPE[x.type] || x.type) + " · " + rupee(x.amt) + (x.paid ? " · paid" : " · due")}${x.r ? " · " + esc(x.r) : ""}</small></div><button class="link" data-a="lgEdit" data-k="${k}" data-id="${esc(x.id)}">Edit</button></div>`; }).join("") + (it.length > L.n ? `<p><button class="btn alt sm" data-a="lgMore" data-k="${k}">Show more (${it.length - L.n})</button></p>` : "") || `<p class="sub">Nothing logged yet.</p>`;
+  $("ll-" + k).innerHTML = part.map(x => { const s = stuById(x.sid); return `<div class="lrow"><label class="cb"><input type="checkbox" data-c="lgChk" data-k="${k}" data-id="${esc(x.id)}" ${L.sel.has(x.id) ? "checked" : ""} aria-label="Select"></label><div class="lm"><b>${esc(s ? s.name : "?")}</b><small>${fmtD(x.date)} · ${k === "calls" ? esc(callTxt(x)) : esc(FTYPE[x.type] || x.type) + " · " + rupee(x.amt) + (x.paid ? " · paid" : " · due")}${x.r ? " · " + esc(x.r) : ""}${k === "calls" ? grBadge(x) : ""}</small></div><button class="link" data-a="lgEdit" data-k="${k}" data-id="${esc(x.id)}">Edit</button></div>`; }).join("") + (it.length > L.n ? `<p><button class="btn alt sm" data-a="lgMore" data-k="${k}">Show more (${it.length - L.n})</button></p>` : "") || `<p class="sub">Nothing logged yet.</p>`;
   lgCount(k);
 }
 const lgCount = k => { const e = $("lc-" + k); if (e) e.textContent = LG[k].sel.size ? LG[k].sel.size + " selected" : "Tick entries to change their date or delete them together."; };
@@ -971,14 +1024,14 @@ A.lgDateGo = b => busy(b, async () => { const d = $("lgd").value; if (!d) return
 A.lgEdit = b => {
   const k = b.dataset.k, x = lgItems(k).find(i => i.id === b.dataset.id); if (!x) return; LG.cur = { k, id: x.id, x };
   sheet(`<h2>${esc((stuById(x.sid) || { name: "" }).name)}</h2>` + (k === "calls"
-    ? `<div class="row"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"><select id="er" aria-label="Response">${RESP.map(r => `<option ${r === x.resp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div><p><input id="en" placeholder="Remark" value="${esc(x.r || "")}" style="width:100%"></p>`
+    ? callEditHTML(x)
     : `<div class="row"><select id="et" aria-label="Type">${Object.entries(FTYPE).map(([a, v]) => `<option value="${a}" ${a === x.type ? "selected" : ""}>${v}</option>`).join("")}</select><input id="ea" type="number" inputmode="decimal" value="${x.amt}" aria-label="Amount"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"></div><p><input id="en" placeholder="Remark" value="${esc(x.r || "")}" style="width:100%"></p><label class="cb"><input type="checkbox" id="ep" ${x.paid ? "checked" : ""}> Paid</label>`)
     + `<p></p><div class="row"><button class="btn" data-a="lgSave" style="flex:2">Save</button><button class="btn alt" data-a="lgDelOne">Delete</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
 };
 A.lgSave = b => {
   const { k, x } = LG.cur, { id, ...rest } = x; let v;
   if (!$("ed").value) return $("e2").textContent = "Pick a date.";
-  if (k === "calls") v = Object.assign(rest, { date: $("ed").value, resp: $("er").value, r: $("en").value.trim(), t: Date.now() });
+  if (k === "calls") { const rr = callEditRead(rest); if (rr.err) return $("e2").textContent = rr.err; v = rr.v; }
   else { const amt = +$("ea").value; if (!(amt > 0)) return $("e2").textContent = "Enter an amount."; const paid = $("ep").checked ? 1 : 0; v = Object.assign(rest, { type: $("et").value, amt, date: $("ed").value, r: $("en").value.trim(), paid, t: Date.now() }); if (paid) v.pd = rest.pd || today(); else delete v.pd; }
   const cls = C.cls; patchQ(P.k(k, cls), [{ k: "items." + id, v }], e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   closeSheet(true); toast("Saved"); cTab();
@@ -1228,7 +1281,7 @@ A.repSheet = () => {
   printHTML(`${rhead("Class " + I.cls + " marks sheet")}<table class="pt"><tr><th>Student</th>${subs.map(s => `<th>${esc(s)} %</th>`).join("")}<th>Overall %</th><th>Notebook %</th></tr>${st.rows.map(r => `<tr><td>${esc(r.s.name)}</td>${subs.map(s => `<td>${r0(avg(r.sub[s] || []))}</td>`).join("")}<td><b>${r0(r.avg)}</b></td><td>${r0(r.nb)}</td></tr>`).join("")}<tr><td><b>Class average</b></td>${subs.map(s => `<td>${r0(avg(st.rows.flatMap(r => r.sub[s] || [])))}</td>`).join("")}<td><b>${r0(st.classAvg)}</b></td><td>${r0(st.nbPct)}</td></tr></table>`);
 };
 /* ----- report cards: the teacher chooses what each card contains ----- */
-const RC_DEF = { logo: 1, sub: 1, tests: 1, term: 1, nb: 1, fine: 1, fee: 1, att: 1, calls: 0, attn: 1, sig: 1 };
+const RC_DEF = { logo: 1, sub: 1, tests: 1, term: 1, nb: 1, fine: 1, fee: 1, att: 1, calls: 0, attn: 1, sg: ["Class teacher"], par: 1 };
 const rcOpt = () => { try { return Object.assign({}, RC_DEF, JSON.parse(localStorage.rcopt || "{}")); } catch { return Object.assign({}, RC_DEF); } };
 function termTable(cls, sid, subs) {
   const terms = S.cfg.terms.filter(t => subs.some(s => getAt(D[P.marks(cls, s)] || {}, ["tests", tTid(t)]))); if (!terms.length) return "";
@@ -1247,15 +1300,15 @@ function cardHTML(r, st, o) {
   if (inch && (o.fine || o.fee)) h += `<p>${o.fine ? `Fines pending: <b>${rupee(fineDue(I.cls, sid))}</b>` : ""}${o.fine && o.fee ? " · " : ""}${o.fee ? (() => { const c = fyCalc(I.cls, y, sid); return `Fees ${fyLab(y)}: <b>${esc(c.r ? fyText(I.cls, y, sid) : "no record")}</b>${c.owedM > 0 ? ` (${fyM(c.owedM)} pending)` : ""}${c.bal != null ? ` · due ${rupee(c.bal)}` : ""}`; })() : ""}</p>`;
   if (inch && o.calls) { const cl = callsOf(I.cls, sid).slice(0, 3); if (cl.length) h += `<h4>Parent contact</h4><p>${cl.map(c => `${fmtD(c.date)} · ${esc(c.resp)}${c.r ? " · " + esc(c.r) : ""}`).join("<br>")}</p>`; }
   if (o.attn && r.risk.length) h += `<p>Attention: ${esc(r.risk.join(", "))}</p>`;
-  return h + `<div class="sig"><span>${o.sig && S.sig ? `<img class="sgi" src="${S.sig}" alt="">` : ""}Class teacher</span><span>Parent</span></div></section>`;
+  return h + `${sigRow(o.sg || ["Class teacher"], o.par)}</section>`;
 }
 function rcAsk(scope) {
   const o = rcOpt(), inch = inchargeClasses().includes(I.cls);
-  const L = [["sub", "Subject-wise summary (tests, average, class average)"], ["tests", "Test-by-test marks"], ["term", "Term exam marks"], ["nb", "Notebook status"], ["att", "Absent days & leaves (month-wise)", 1], ["fine", "Fines pending", 1], ["fee", "Fees (month-wise status)", 1], ["calls", "Parent call notes", 1], ["attn", "Attention / at-risk note"], ["logo", "School logo in the header"], ["sig", "My signature (class teacher)"]];
-  sheetL(`<h2>What should the report card show?</h2><p class="sub">Tick the details to include. Your choice is remembered.</p><div class="xsets" id="rcchk">${L.filter(x => !x[2] || inch).map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div><div class="row"><button class="btn" data-a="rcGo" data-s="${scope}" style="flex:2">${ic("print", 18)} Print ${scope === "all" ? "whole class" : "this student"}</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+  const L = [["sub", "Subject-wise summary (tests, average, class average)"], ["tests", "Test-by-test marks"], ["term", "Term exam marks"], ["nb", "Notebook status"], ["att", "Absent days & leaves (month-wise)", 1], ["fine", "Fines pending", 1], ["fee", "Fees (month-wise status)", 1], ["calls", "Parent call notes", 1], ["attn", "Attention / at-risk note"], ["logo", "School logo in the header"]];
+  sheetL(`<h2>What should the report card show?</h2><p class="sub">Tick the details to include. Your choice is remembered.</p><div class="xsets" id="rcchk">${L.filter(x => !x[2] || inch).map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div><h4>Signatures</h4>${sgBoxes("rcsg", o.sg || ["Class teacher"], false)}<div class="xsets"><label class="cb"><input type="checkbox" id="rcpar" ${o.par ? "checked" : ""}> Parent signature line</label></div><p></p><div class="row"><button class="btn" data-a="rcGo" data-s="${scope}" style="flex:2">${ic("print", 18)} Print ${scope === "all" ? "whole class" : "this student"}</button><button class="btn alt" data-a="close">Cancel</button></div>`);
 }
 A.rcGo = b => {
-  const o = rcOpt(); document.querySelectorAll("#rcchk input").forEach(i => o[i.value] = i.checked ? 1 : 0);
+  const o = rcOpt(); document.querySelectorAll("#rcchk input").forEach(i => o[i.value] = i.checked ? 1 : 0); o.sg = [...document.querySelectorAll("#rcsg input:checked")].map(i => i.value); o.par = $("rcpar").checked ? 1 : 0;
   try { localStorage.rcopt = JSON.stringify(o); } catch { } closeSheet(true);
   const st = stats(I.cls), rows = b.dataset.s === "all" ? st.rows : st.rows.filter(x => x.s.id === I.sid);
   if (rows.length) printHTML(rows.map(r => cardHTML(r, st, o)).join(""));
@@ -1337,13 +1390,13 @@ A.sBulkGo = b => busy(b, async () => {
 async function adSettings(host) {
   const c = S.cfg;
   host.innerHTML = `<div class="card" id="shcard"><h3>Google Sheets backup</h3><p class="sub" id="shst">Checking…</p><div class="row"><button class="btn alt" data-a="shTest">Test connection</button><button class="btn" data-a="shSync">Sync all data now</button></div><div class="sub" id="shlog" role="status"></div></div>
-   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Subjects<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
+   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Subjects<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
   shStatus();
   try { const l = (await api("GET", "/admin/audit")).log.slice(0, 12); $("aud").innerHTML = l.map(x => `<div class="li"><span>${esc(x.who)} ${esc(x.what)}</span><small>${new Date(x.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div>`).join("") || "Nothing yet."; } catch { $("aud").textContent = ""; }
 }
 A.cfgSave = b => busy(b, async () => {
   const l = id => $(id).value.split(",").map(x => x.trim()).filter(Boolean);
-  const config = { school: $("cs").value.trim(), classes: l("cc"), subjects: l("cu"), monitorCategories: l("cm"), terms: l("ct"), nonEnglishFine: +$("cf").value, passPercent: +$("cp").value };
+  const config = { school: $("cs").value.trim(), classes: l("cc"), subjects: l("cu"), monitorCategories: l("cm"), terms: l("ct"), signatories: l("cg"), nonEnglishFine: +$("cf").value, passPercent: +$("cp").value };
   try { await api("POST", "/admin/config", { config }); S.cfg = await api("GET", "/config"); toast("Settings saved"); buildNav(); } catch (x) { $("e2").textContent = x.message; }
 });
 
@@ -1423,7 +1476,7 @@ A.xGo = b => busy(b, async () => {
     await loadXlsx();
     const out = {}, add = (name, h, row) => (out[name] = out[name] || { h, rows: [] }).rows.push(row);
     const H = { test: ["Class", "Subject", "Test", "Date", "Student", "Marks", "Out of", "Percent", "Remark", "Entered by", "Type"], nb: ["Class", "Subject", "Date", "Student", "Chapters done", "Chapters checked", "Percent", "Chapter details", "Remark", "Entered by"],
-      fee: ["Class", "Year", "Student", "Total fee", "Paid", "Due", ...MN, "Status", "Entered by"], att: ["Class", "Month", "Student", "Working days", "Absent days", "Leaves", "Entered by"], call: ["Class", "Student", "Date", "Parent's response", "Remark", "Entered by"],
+      fee: ["Class", "Year", "Student", "Total fee", "Paid", "Due", ...MN, "Status", "Entered by"], att: ["Class", "Month", "Student", "Working days", "Absent days", "Leaves", "Entered by"], call: ["Class", "Student", "Date", "Parent's response", "Remark", "Entered by", "Type", "Pay by", "Grievance", "Grievance status", "Resolved on", "Resolution"],
       fine: ["Class", "Student", "Date", "Type", "Amount", "Paid", "Paid on", "Remark", "Entered by"] };
     const all = S.cfg.subjects, HC = ["Class", "Student", "Tests taken", "Average %", ...all.map(s => s + " %"), "Notebook checks", "Notebook %", "Calls made", "Last call", "Last response", "Fines added", "Fines pending now", "Fee paid (amount entered)", "Fee due (amount entered)"];
     for (const { c, subs: sl, full } of jobs) {
@@ -1449,7 +1502,7 @@ A.xGo = b => busy(b, async () => {
         Object.keys(fe).filter(k => /^Y_\d{4}-\d{2}$/.test(k)).sort().forEach(k => { const y = +k.slice(2, 6); if (`${y}-04-01` > rg.to || `${y + 1}-03-31` < rg.from) return; stu.forEach(s => { const r = fe[k][s.id]; if (!r) return; const cl = fyCalc(c, y, s.id); acc[s.id].fPaid += r.paid || 0; acc[s.id].fBal += cl.bal || 0; if (sets.has("fee")) add("Fees", H.fee, [c, fyLab(y), s.name, r.total ?? "", r.paid ?? "", cl.bal ?? "", ...fyMonths(y).map(m => ["", "Half", "Full"][(r.months || {})[m.k] || 0]), fyTxt(r.months || {}, y), r.by || ""]); }); });
         const at = FD("attendance", c);
         Object.keys(at).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from).sort().forEach(m => stu.forEach(s => { const a = at[m][s.id]; if (a && sets.has("att")) add("Attendance", H.att, [c, m, s.name, at[m]._wd ?? "", a.a || 0, a.l || 0, a.by || ""]); }));
-        callsOf(c).filter(k => inR(k.date)).reverse().forEach(k => { const s = stuById(k.sid); if (!s || !acc[s.id]) return; acc[s.id].calls.push(k); if (sets.has("call")) add("Calls record", H.call, [c, s.name, k.date, k.resp, k.r || "", k.by || ""]); });
+        callsOf(c).filter(k => inR(k.date)).reverse().forEach(k => { const s = stuById(k.sid); if (!s || !acc[s.id]) return; acc[s.id].calls.push(k); if (sets.has("call")) add("Calls record", H.call, [c, s.name, k.date, k.resp, k.r || "", k.by || "", callKind(k) === "fee" ? "Fee" : "Feedback", k.until || "", k.gr || "", k.gr ? (k.grs ? "Resolved" : "Open") : "", k.grd || "", k.grn || ""]); });
         fineRows(c).sort((a, z) => a.date.localeCompare(z.date)).forEach(f => { const s = stuById(f.sid); if (!s || !acc[s.id]) return; if (!f.paid) acc[s.id].fPend += f.amt; if (inR(f.date)) { acc[s.id].fAdd += f.amt; if (sets.has("fine")) add("Fines record", H.fine, [c, s.name, f.date, FTYPE[f.type] || f.type, f.amt, f.paid ? "Yes" : "No", f.pd || "", f.r || "", f.by || ""]); } });
       }
       if (sets.has("all")) stu.forEach(s => { const a = acc[s.id], lc = a.calls[a.calls.length - 1]; add("Combined", HC, [c, s.name, a.pts.length, a.pts.length ? Math.round(avg(a.pts) * 10) / 10 : "", ...all.map(x => a.sub[x] ? Math.round(avg(a.sub[x]) * 10) / 10 : ""), a.nbP.length, a.nbP.length ? Math.round(avg(a.nbP) * 10) / 10 : "", full ? a.calls.length : "", lc ? lc.date : "", lc ? lc.resp : "", full ? a.fAdd : "", full ? a.fPend : "", full ? a.fPaid : "", full ? a.fBal : ""]); });
@@ -1519,8 +1572,11 @@ async function impPlan(wb, alias = {}, chAlias = {}) {
     const c = cc(r.Class), date = nd(r.Date); if (!canInch(c)) { skip(whyInch(c, "calls")); continue; }
     const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; } if (!date) { skip(`call for ${s.name}: unreadable date “${str(r.Date)}”`); continue; }
     const path = P.k("calls", c), f = await ld(path), resp = str(r["Parent's response"]) || "Informed", rem = str(r.Remark);
-    if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.resp === resp && (x.r || "") === rem)) continue;
-    put(path, { k: "items." + uid("c") + R.n.toString(36), v: { sid: s.id, date, resp, r: rem, by, t: now } }, "Calls");
+    const fee = nk(r.Type) === "fee", until = nd(r["Pay by"]), gr = str(r.Grievance);
+    if (Object.values(f.items || {}).some(x => x.sid === s.id && x.date === date && x.resp === resp && (x.r || "") === rem && (x.kind === "fee") === fee)) continue;
+    const v = { sid: s.id, date, resp, r: rem, by, t: now }; if (fee) v.kind = "fee"; if (until) v.until = until;
+    if (gr && !fee) { v.gr = gr; v.grs = nk(r["Grievance status"]) === "resolved" ? 1 : 0; if (v.grs) { v.grd = nd(r["Resolved on"]) || date; if (str(r.Resolution)) v.grn = str(r.Resolution); } }
+    put(path, { k: "items." + uid("c") + R.n.toString(36), v }, "Calls");
   }
   for (const r of rows("Fines record")) {
     const c = cc(r.Class), date = nd(r.Date), amt = +r.Amount; if (!canInch(c)) { skip(whyInch(c, "fines")); continue; }
@@ -1662,28 +1718,31 @@ A.impUndo = b => busy(b, async () => {
 let cur = "home", pin = "", sel = "", sw = false;
 const deviceId = () => localStorage.did || (localStorage.did = crypto.randomUUID());
 const rec = () => { try { return JSON.parse(localStorage.recent || "[]"); } catch { return []; } };
-const remember = (u, n) => localStorage.recent = JSON.stringify([{ u, n }, ...rec().filter(x => x.u !== u)].slice(0, 4));
+const remember = (u, n, s) => localStorage.recent = JSON.stringify([{ u, n, s }, ...rec().filter(x => x.u !== u)].slice(0, 4));
 
 /* ----- login ----- */
+/* ----- login (SchoolDesk) ----- */
+const loginSub = u => u.role === "admin" ? "Admin" : u.inchargeOf ? "Teacher · Incharge of " + u.inchargeOf : "Teacher";
 function renderAcct() {
-  const r = rec(), a = $("acct"), inp = $("user");
-  if (!sw && r.length) { const c = r.find(x => x.u === sel) || r[0]; sel = c.u; inp.classList.add("hide"); a.innerHTML = `<div class="av">${esc(c.n[0] || "?").toUpperCase()}</div><b>${esc(c.n)}</b><p><button class="link" data-a="lgSwitch">Switch user</button></p>`; }
-  else if (r.length) { inp.classList.add("hide"); a.innerHTML = r.map(x => `<button class="st" data-a="lgPick" data-u="${esc(x.u)}">${esc(x.n)}</button>`).join("") + `<button class="st" data-a="lgOther">Another user…</button>`; }
+  const r = rec(), a = $("acct"), inp = $("user"); $("login").classList.toggle("pick", sw && r.length > 0);
+  if (!sw && r.length) { const c = r.find(x => x.u === sel) || r[0]; sel = c.u; inp.classList.add("hide"); a.innerHTML = `<div class="av">${esc((c.n[0] || "?").toUpperCase())}</div><b class="lname">${esc(c.n)}</b><small class="lsub">${esc(c.s || "Teacher")} · @${esc(c.u)}</small><p><button class="lk" data-a="lgSwitch">${ic("swap", 16)} Switch user</button></p>`; }
+  else if (r.length) { inp.classList.add("hide"); a.innerHTML = `<h2 class="lh">Choose a profile</h2>` + r.map(x => `<button class="prow" data-a="lgPick" data-u="${esc(x.u)}"><span class="av sm">${esc((x.n[0] || "?").toUpperCase())}</span><span class="pm"><b>${esc(x.n)}</b><small>${esc(x.s || "Teacher")} · @${esc(x.u)}</small></span>${ic("chevr", 18)}</button>`).join("") + `<button class="prow dash" data-a="lgOther"><span class="av sm">${ic("plus", 18)}</span><span class="pm"><b>Another user</b><small>Sign in with a username</small></span></button>`; }
   else { a.innerHTML = ""; inp.classList.remove("hide"); }
 }
 A.lgSwitch = () => { sw = true; pin = ""; drawPad(); renderAcct(); };
-A.lgPick = b => { sel = b.dataset.u; sw = false; renderAcct(); };
-A.lgOther = () => { sel = ""; $("acct").innerHTML = ""; $("user").classList.remove("hide"); $("user").focus(); };
-const drawPad = () => $("dots").innerHTML = [0, 1, 2, 3, 4, 5].map(i => `<i class="${i < pin.length ? "f" : ""}"></i>`).join("");
-$("pad").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, "⌫", 0, "Go"].map(k => `<button data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k}">${k}</button>`).join("");
+A.lgPick = b => { sel = b.dataset.u; sw = false; pin = ""; renderAcct(); drawPad(); };
+A.lgOther = () => { sel = ""; $("login").classList.remove("pick"); $("acct").innerHTML = ""; $("user").classList.remove("hide"); $("user").focus(); };
+const drawPad = () => $("dots").innerHTML = pin.length ? [...pin].map(() => `<i class="f"></i>`).join("") : `<span class="phint">Enter your PIN</span>`;
+$("pad").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, "⌫", 0, "Go"].map(k => `<button data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k === "Go" ? "Sign in" : k}">${k === "⌫" ? ic("backspace", 24) : k === "Go" ? ic("arrow", 26) : k}</button>`).join("");
+drawPad();
 async function doLogin() {
   const uname = (sel || $("user").value).trim().toLowerCase(); $("err").textContent = "";
   if (!uname) return $("err").textContent = "Enter your username.";
   if (pin.length < 4) return $("err").textContent = "PIN must be 4 to 6 digits.";
-  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId() }); token = r.token; localStorage.tok = token; remember(uname, r.user.name); S.me = r.user; await start(); }
+  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId() }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(); }
   catch (x) { $("err").textContent = x.message; pin = ""; drawPad(); }
 }
-$("pad").onclick = e => { const k = e.target.dataset.k; if (!k) return; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
+$("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
 addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
 
 /* ----- start / shell ----- */
