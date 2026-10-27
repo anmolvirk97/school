@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,interactive-widget=resizes-content">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'sha256-Ni9ScsOiO9bsat88O5aiPCd2+U280yYX4UE8PwApNVc='; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://school-api.anmolvirk1997.workers.dev; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer">
 <title>SchoolDesk</title>
 <script>try{var t=JSON.parse(localStorage.theme||"{}"),n=t.mode==="night"||(t.mode!=="day"&&t.mode!=="time"&&matchMedia("(prefers-color-scheme: dark)").matches);document.documentElement.dataset.theme=n?(t.night||"legacy"):"day"}catch(e){}</script>
 <meta name="theme-color" content="#0b4a4a"><link rel="manifest" href="manifest.json"><link rel="icon" href="icon.svg">
@@ -9,6 +11,7 @@
 
 <section id="login" class="login"><button class="tbtn" data-a="theme" aria-label="Theme settings"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5z"/></svg></button><div class="lcard">
  <div class="brand"><img class="blogo" src="icon.svg" alt=""><div><b>SchoolDesk</b><small>SCHOOL RECORDS</small></div></div>
+ <p id="lnote" class="lnote hide" role="status"></p>
  <div id="acct"></div><input id="user" class="hide" placeholder="Username" autocomplete="username" autocapitalize="none" aria-label="Username">
  <div class="dots" id="dots" aria-hidden="true"></div><div class="err" id="err" role="alert"></div>
  <div class="pad" id="pad"></div>
@@ -28,6 +31,7 @@
 </div>
 
 <div id="veil" class="veil hide"></div><div id="sheet" class="sheet hide" role="dialog" aria-modal="true"></div>
+<div id="idle" class="idle hide" role="alertdialog" aria-live="assertive" aria-label="Inactivity warning"><div><b>Still there?</b><p>For security you will be signed out in</p><div class="num"><span id="idlen">10</span>s</div><button class="btn" data-a="stay">Stay signed in</button></div></div>
 <div id="toast" class="toast hide" role="status"></div><div id="sync" class="syncb hide"></div><div id="print"></div>
 
 <script src="script.js"></script></body></html>
