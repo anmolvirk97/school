@@ -1798,9 +1798,9 @@ A.stay = () => { lastAct = Date.now(); hideIdle(); };
 A.logout = () => signOut("manual");
 /* where has this profile been signed in? */
 A.sessInfo = async () => {
-  sheetL(`<h2>Recent sign-ins</h2><p class="sub">Loading…</p>`); let r; try { r = await api("GET", "/session/info"); } catch (x) { return toast(x.message, true); }
+  sheetL(`<h2>Recent logins</h2><p class="sub">Loading…</p>`); let r; try { r = await api("GET", "/session/info"); } catch (x) { return toast(x.message, true); }
   const me = deviceId(), when = t => new Date(t).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }), why = { idle: "inactivity", manual: "signed out", admin: "admin" };
-  sheetL(`<h2>Recent sign-ins</h2><p class="sub">Only one device can use this profile at a time. This list shows where it was opened and closed.</p>${r.cur ? `<p>Active now: <b>${esc(r.cur.label)}</b>${r.cur.dev === me ? ` <span class="pill">this device</span>` : ""}</p>` : ""}<div class="mlist">${(r.hist || []).map(h => `<div class="lrow"><div class="lm"><b>${h.ev === "in" ? "Signed in" : "Signed out"} · ${esc(h.label || "device")}${h.dev === me ? ` <span class="pill">this device</span>` : ""}</b><small>${esc(when(h.t))}${h.ev === "in" && h.took ? " · replaced another session" : ""}${h.ev === "out" ? " · " + esc(why[h.why] || h.why || "") : ""}${h.country ? " · " + esc(h.country) : ""}</small></div></div>`).join("") || `<p class="sub">No history yet.</p>`}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
+  sheetL(`<h2>Recent logins</h2><p class="sub">Only one device can use this profile at a time. This list shows where it was opened and closed.</p>${r.cur ? `<p>Active now: <b>${esc(r.cur.label)}</b>${r.cur.dev === me ? ` <span class="pill">this device</span>` : ""}</p>` : ""}<div class="mlist">${(r.hist || []).map(h => `<div class="lrow"><div class="lm"><b>${h.ev === "in" ? "Signed in" : "Signed out"} · ${esc(h.label || "device")}${h.dev === me ? ` <span class="pill">this device</span>` : ""}</b><small>${esc(when(h.t))}${h.ev === "in" && h.took ? " · replaced another session" : ""}${h.ev === "out" ? " · " + esc(why[h.why] || h.why || "") : ""}${h.country ? " · " + esc(h.country) : ""}</small></div></div>`).join("") || `<p class="sub">No history yet.</p>`}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
 };
 
 /* ----- login (SchoolDesk) ----- */
@@ -1810,6 +1810,7 @@ function renderAcct() {
   if (!sw && r.length) { const c = r.find(x => x.u === sel) || r[0]; sel = c.u; inp.classList.add("hide"); a.innerHTML = `<div class="av">${esc((c.n[0] || "?").toUpperCase())}</div><b class="lname">${esc(c.n)}</b><small class="lsub">${esc(c.s || "Teacher")} · @${esc(c.u)}</small><p><button class="lk" data-a="lgSwitch">${ic("swap", 16)} Switch user</button></p>`; }
   else if (r.length) { inp.classList.add("hide"); a.innerHTML = `<h2 class="lh">Choose a profile</h2>` + r.map(x => `<div class="prwrap"><button class="prow" data-a="lgPick" data-u="${esc(x.u)}"><span class="av sm">${esc((x.n[0] || "?").toUpperCase())}</span><span class="pm"><b>${esc(x.n)}</b><small>${esc(x.s || "Teacher")} · @${esc(x.u)}</small></span>${ic("chevr", 18)}</button><button class="pforget" data-a="lgForget" data-u="${esc(x.u)}" aria-label="Remove ${esc(x.n)} from this device">✕</button></div>`).join("") + `<button class="prow dash" data-a="lgOther"><span class="av sm">${ic("plus", 18)}</span><span class="pm"><b>Another user</b><small>Sign in with a username</small></span></button>`; }
   else { a.innerHTML = ""; inp.classList.remove("hide"); }
+  if (!sw && r.length) loginWarm(sel);
 }
 A.lgSwitch = () => { sw = true; pin = ""; drawPad(); renderAcct(); };
 A.lgPick = b => { sel = b.dataset.u; sw = false; pin = ""; renderAcct(); drawPad(); };
@@ -1831,7 +1832,7 @@ async function doLogin(force) {
   const uname = (sel || $("user").value).trim().toLowerCase(); $("err").textContent = "";
   if (!uname) return $("err").textContent = "Enter your username.";
   if (pin.length < 4) return $("err").textContent = "PIN must be 4 to 6 digits.";
-  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(); }
+  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
   catch (x) { if (x.code === "active_elsewhere") return takeoverAsk(x.other); $("err").textContent = x.message; pin = ""; drawPad(); }
 }
 $("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
@@ -1845,11 +1846,20 @@ A.lgForce = () => { closeSheet(true); doLogin(true); };
 A.lgCancel = () => { closeSheet(true); pin = ""; drawPad(); };
 const lnoteShow = () => { try { const m = sessionStorage.msg; if (m) { $("lnote").textContent = m; $("lnote").classList.remove("hide"); sessionStorage.removeItem("msg"); } } catch { } };
 lnoteShow();
+
+/* while the person is still choosing a profile / typing a username, the server loads everything the sign-in needs, so pressing Go only has to check the PIN */
+const warmed = {};
+function loginWarm(u) {
+  u = String(u || "").trim().toLowerCase(); if (u.length < 2 || Date.now() - (warmed[u] || 0) < 15000) return; warmed[u] = Date.now();
+  api("POST", "/login/warm", { username: u }).then(r => { if (r && r.wait > 0 && (sel || $("user").value.trim().toLowerCase()) === u) $("err").textContent = `This profile is locked for ${r.wait > 90 ? Math.ceil(r.wait / 60) + " minutes" : r.wait + " seconds"}.`; }).catch(() => { });
+}
+let warmT = 0; $("user").addEventListener("input", () => { clearTimeout(warmT); warmT = setTimeout(() => loginWarm($("user").value), 450); });
 addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
 
 /* ----- start / shell ----- */
-async function start() {
-  [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);
+async function start(pre) {
+  if (pre && pre.config && pre.students) { S.cfg = pre.config; S.students = pre.students; } else [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);   // a fresh sign-in already brings both
+
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("avb").textContent = S.me.name[0].toUpperCase();
   lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); buildNav(); renderSide(); go("home"); loadAssets(); flushQueue(); syncBadge();
   setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 800);   // warm up the incharge screens
@@ -1880,10 +1890,10 @@ A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.data
 /* ----- profile ----- */
 /* ----- profile: avatar, name, username + role, theme, signature screen, PIN ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
-  <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Theme &amp; night mode</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent sign-ins</b>${ic("chevr", 18)}</button></div>
+  <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Theme &amp; night mode</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent logins</b>${ic("chevr", 18)}</button></div>
   <h3 style="margin-top:18px">Change PIN</h3><div class="form"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN" autocomplete="current-password"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN" autocomplete="new-password"><input id="np2" type="password" inputmode="numeric" maxlength="6" placeholder="Repeat new PIN" aria-label="Repeat new PIN" autocomplete="new-password"></div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
-A.sigScreen = () => sheetL(`<h2>My signature</h2><p class="sub">Printed on mark sheets and report cards wherever “Class teacher” is ticked.</p><div class="sgprev">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
+A.sigScreen = () => sheetL(`<h2>My signature</h2><p class="sub">Printed on mark sheets and report cards wherever “Class teacher” is ticked.</p><div class="sgprev sgsig">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
 A.pinSave = b => busy(b, async () => { if ($("np").value !== $("np2").value) return $("e2").textContent = "The two new PINs do not match."; try { await api("POST", "/pin/change", { oldPin: $("op").value, newPin: $("np").value }); closeSheet(true); toast("PIN changed"); } catch (x) { $("e2").textContent = x.message; } });
 
 /* ----- right panel (profile + this week's monitors over the school skyline) ----- */
