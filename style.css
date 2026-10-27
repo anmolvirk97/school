@@ -246,3 +246,15 @@ html[data-theme=neon] .xclose{box-shadow:0 0 12px #5bb98c55}
 .idle{position:fixed;inset:0;display:grid;place-items:center;background:#000a;z-index:300;padding:20px}.idle>div{background:var(--card);color:var(--ink);border-radius:28px;padding:24px 22px;max-width:340px;width:100%;text-align:center;box-shadow:0 20px 60px #0008}.idle b{font-size:22px}.idle p{color:var(--mut);margin:6px 0}.idle .num{font-size:48px;font-weight:800;color:var(--deep);margin:2px 0 12px;line-height:1}
 .lnote{background:#ffffff1c;border:1px solid #ffffff3a;color:#fff;border-radius:16px;padding:10px 12px;margin:0 0 14px;font-weight:700;font-size:14px;text-align:left}
 .prwrap{display:flex;align-items:center;gap:6px}.prwrap .prow{flex:1;min-width:0}.pforget{flex:none;width:34px;height:34px;border-radius:50%;background:#ffffff1f;color:#fff;font-size:13px}.pforget:active{background:#ffffff3a}
+
+/* v10: login card can never be wider than the phone */
+.login{grid-template-columns:minmax(0,1fr);overflow-x:hidden}
+.lcard{width:100%;max-width:390px;min-width:0;justify-self:center}
+.prwrap,.prow,.pm{min-width:0;max-width:100%}.pm small,.pm b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:420px){.lcard{padding:22px 16px 16px;border-radius:28px}.brand{margin-bottom:14px}.lcard .pad button{height:54px}}
+
+.pm small{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+/* v10: signature preview — white ink on black at night, black ink on white by day */
+.sgsig{background:#fff;color:#111}.sgsig small{color:inherit}.sgsig img{filter:grayscale(1) contrast(1.15)}
+html[data-theme=legacy] .sgsig,html[data-theme=dark] .sgsig,html[data-theme=neon] .sgsig{background:#000;color:#fff}
+html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-theme=neon] .sgsig img{filter:invert(1) grayscale(1)}
