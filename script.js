@@ -169,7 +169,7 @@ let dirty = false;
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
 const sheetL = h => { sheet(h); $("sheet").oninput = null; };
-function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); $("sheet").classList.add("hide"); $("sheet").innerHTML = ""; dirty = false; return true; }
+function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").classList.contains("hide")) closeSheet(); });
 A.close = () => closeSheet();
@@ -598,7 +598,7 @@ const sgBoxes = (id, sel, change) => `<div class="xsets" id="${id}">${sigList().
 const sgOne = (t, img) => `<div class="sgc"><div class="sgbox">${img ? `<img src="${img}" alt="">` : ""}</div><div class="sgt">${esc(t)}</div></div>`;
 const sigRow = (list, parent) => `<div class="sig">${list.filter(Boolean).map(t => sgOne(t, /^class teacher$/i.test(t) && S.sig)).join("")}${parent ? sgOne("Parent") : ""}</div>`;
 const tTid = term => "term_" + termKey(term);
-const tOpt = () => Object.assign({ title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, cn: 6, csg: ["Class teacher"], clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
+const tOpt = () => Object.assign({ fs: 13, rh: 5, tw: 100, title: "Mark Sheet", or: "landscape", col: "Teal", logo: 1, roll: 1, tot: 1, pct: 1, rank: 1, res: 1, max: 1, cn: 6, csg: ["Class teacher"], clogo: 1, crank: 1, cres: 1, cremark: 0, csig: 1, cpar: 1 }, TM.opt);
 function tReadOpt() {
   const o = tOpt(), v = id => $(id) ? $(id).value : null;
   if (v("to-title") != null) { o.title = v("to-title").trim() || "Mark Sheet"; o.or = v("to-or"); o.col = v("to-col"); }
@@ -679,7 +679,7 @@ async function tSheet(host) {
   host.innerHTML = `<div class="card"><div class="row"><select id="tcl" data-c="tClsCh" aria-label="Class">${cs.map(c => `<option ${c === TM.cls ? "selected" : ""}>${esc(c)}</option>`).join("")}</select>${termSel()}</div><p class="sub">Columns are the subjects you can access in this class.</p>
    <h4>Design</h4><div class="form"><label>Title<input id="to-title" data-c="tOptCh" value="${esc(o.title)}" placeholder="Mark Sheet"></label><div class="row"><select id="to-or" data-c="tOptCh" aria-label="Page"><option value="landscape" ${o.or === "landscape" ? "selected" : ""}>Landscape A4</option><option value="portrait" ${o.or === "portrait" ? "selected" : ""}>Portrait A4</option></select><select id="to-col" data-c="tOptCh" aria-label="Colour">${Object.keys(TCOL).map(k => `<option ${o.col === k ? "selected" : ""}>${k}</option>`).join("")}</select></div></div>
    <div class="xsets" id="tchk">${[["logo", "School logo"], ["roll", "Serial no."], ["max", "Max marks under subject names"], ["tot", "Total"], ["pct", "Percentage"], ["rank", "Rank"], ["res", "Result"]].map(([k, v]) => `<label class="cb"><input type="checkbox" data-c="tOptCh" value="${k}" ${o[k] ? "checked" : ""}> ${v}</label>`).join("")}</div>
-   <h4>Signatures</h4>${sgBoxes("tsg", o.sg || sigList(), true)}<p></p><button class="btn" data-a="tPrint">${ic("print", 18)} Print / save PDF</button><div class="err" id="terr"></div></div><div id="tprev"></div>`;
+   <h4>Signatures</h4>${sgBoxes("tsg", o.sg || sigList(), true)}<p></p><div class="row"><button class="btn alt" data-a="tPreview">Preview PDF</button><button class="btn" data-a="tPrint">${ic("print", 18)} Print / save PDF</button></div><div class="err" id="terr"></div></div><div id="tprev"></div>`;
   const t = VT; try { await load(subjectsOf(TM.cls).map(s => P.marks(TM.cls, s)), true); } catch (e) { return $("terr").textContent = e.message; }
   if (!stale(t) && $("tprev")) tPrev();
 }
@@ -687,13 +687,45 @@ function tPrev() { const h = tSheetHTML(TM.cls, TM.term, tReadOpt()); $("tprev")
 function tSheetHTML(cls, term, o) {
   const d = tData(cls, term); if (!d.cols.length) return "";
   const col = TCOL[o.col] || TCOL.Teal, avgOf = i => avg(d.rows.map(r => r.cells[i]).filter(e => e && !e.ab && !e.g).map(e => e.m));
-  return `<div class="msx" style="--ac:${col}"><div class="msh">${o.logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><div>${esc(o.title)} · ${esc(term)} · Class ${esc(cls)}</div></div></div>
+  return `<div class="msx" style="--ac:${col};--fs:${+o.fs || 13}px;--rh:${+o.rh >= 0 ? +o.rh : 5}px;--tw:${+o.tw || 100}%"><div class="msh">${o.logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><div>${esc(o.title)} · ${esc(term)} · Class ${esc(cls)}</div></div></div>
    <table class="pt mst"><tr>${o.roll ? "<th>#</th>" : ""}<th>Student</th>${d.cols.map(c => `<th>${esc(c.sub)}${o.max ? `<br><small>${c.mode === "grade" ? "Grade" : "/" + c.t.max}</small>` : ""}</th>`).join("")}${o.tot ? "<th>Total</th>" : ""}${o.pct ? "<th>%</th>" : ""}${o.rank ? "<th>Rank</th>" : ""}${o.res ? "<th>Result</th>" : ""}</tr>
    ${d.rows.map((r, i) => `<tr>${o.roll ? `<td>${i + 1}</td>` : ""}<td>${esc(r.s.name)}</td>${r.cells.map(e => `<td>${!e ? "" : e.ab ? "Ab" : e.g ? esc(e.g) : e.m}</td>`).join("")}${o.tot ? `<td>${r.n ? r.tot + "/" + r.mx : ""}</td>` : ""}${o.pct ? `<td>${fmt1(r.pct)}</td>` : ""}${o.rank ? `<td>${r.rank || ""}</td>` : ""}${o.res ? `<td class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</td>` : ""}</tr>`).join("")}
    <tr class="avr"><td${o.roll ? ' colspan="2"' : ""}><b>Class average</b></td>${d.cols.map((c, i) => `<td>${fmt1(avgOf(i))}</td>`).join("")}${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0) ? `<td colspan="${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0)}"></td>` : ""}</tr></table>
    ${sigRow(o.sg || sigList())}</div>`;
 }
 A.tPrint = () => { const o = tReadOpt(), h = tSheetHTML(TM.cls, TM.term, o); if (!h) return $("terr").textContent = "No marks to print for this term yet."; printHTML(h, `@page{size:A4 ${o.or};margin:10mm}`); };
+
+/* ----- PDF preview of the exam mark sheet: A4 page, adjust text size / row height / table width until the rows fit ----- */
+const MMPX = 96 / 25.4;
+A.tPreview = () => {
+  const o = tReadOpt(); if (!tSheetHTML(TM.cls, TM.term, o)) return $("terr").textContent = "No marks to preview for this term yet.";
+  sheetL(`<h2>PDF preview</h2><p class="sub">${esc(TM.term)} · Class ${esc(TM.cls)} · A4. Adjust until it fits, then print. The red dashed line is the bottom of the page.</p>
+   <div class="row"><select id="tp-or" aria-label="Page layout"><option value="landscape">Landscape A4</option><option value="portrait">Portrait A4</option></select></div>
+   <div class="tpc"><label>Text size <b id="tp-fs-v"></b><input id="tp-fs" type="range" min="6" max="18" step="0.5"></label><label>Row height <b id="tp-rh-v"></b><input id="tp-rh" type="range" min="0" max="14" step="0.5"></label><label>Table width <b id="tp-tw-v"></b><input id="tp-tw" type="range" min="50" max="100" step="1"></label></div>
+   <p class="sub" id="tp-info" role="status"></p><div class="tpw" id="tp-w"><div class="tpr" id="tp-r"><div class="tpg" id="tp-g"></div></div></div>
+   <div class="row"><button class="btn alt" data-a="tFit">Fit to one page</button><button class="btn" data-a="tPrintP" style="flex:2">${ic("print", 18)} Print / save PDF</button><button class="btn alt" data-a="close">Close</button></div>`);
+  $("sheet").classList.add("wide"); $("tp-or").value = o.or; $("tp-fs").value = o.fs; $("tp-rh").value = o.rh; $("tp-tw").value = o.tw;
+  $("sheet").oninput = tpDraw; setTimeout(tpDraw, 30);
+};
+function tpDraw() {
+  if (!$("tp-g")) return 1;
+  const o = tOpt(); o.or = $("tp-or").value; o.fs = +$("tp-fs").value; o.rh = +$("tp-rh").value; o.tw = +$("tp-tw").value; TM.opt = o;
+  try { localStorage.tmOpt = JSON.stringify(o); } catch { } if ($("to-or")) $("to-or").value = o.or;
+  $("tp-fs-v").textContent = o.fs + " px"; $("tp-rh-v").textContent = o.rh + " px"; $("tp-tw-v").textContent = o.tw + "%";
+  const L = o.or === "landscape", pw = L ? 297 : 210, ph = L ? 210 : 297, avH = (ph - 20) * MMPX, g = $("tp-g"), r = $("tp-r");
+  g.style.cssText = `width:${pw}mm;min-height:${ph}mm;padding:10mm`; g.innerHTML = tSheetHTML(TM.cls, TM.term, o);
+  const k = Math.min(1, ($("tp-w").clientWidth - 20) / (pw * MMPX)) || 1, ch = g.firstElementChild.offsetHeight, pages = Math.max(1, Math.ceil((ch - 2) / avH));
+  for (let i = 1; i <= pages; i++) g.insertAdjacentHTML("beforeend", `<div class="tpb" style="top:${10 * MMPX + i * avH}px"></div>`);
+  g.style.transform = `scale(${k})`; r.style.height = Math.max(ph * MMPX, g.offsetHeight) * k + "px";
+  $("tp-info").innerHTML = pages === 1 ? `<span class="ok">Fits on 1 page.</span>` : `About ${pages} pages. Lower the text size or row height, or press Fit to one page.`;
+  return pages;
+}
+A.tFit = () => {
+  let fs = +$("tp-fs").value, rh = +$("tp-rh").value; const set = () => { $("tp-fs").value = fs; $("tp-rh").value = rh; return tpDraw(); };
+  let n = set(); while (n > 1 && rh > 1) { rh = Math.max(1, rh - 0.5); n = set(); } while (n > 1 && fs > 6) { fs -= 0.5; n = set(); }
+  if (n > 1) toast("Even at the smallest size this class needs more than one page.", true);
+};
+A.tPrintP = () => { closeSheet(true); A.tPrint(); };
 
 /* ----- mini report cards (4 / 6 / 8 per A4 page) ----- */
 async function tCards(host) {
