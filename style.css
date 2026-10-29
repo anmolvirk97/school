@@ -258,3 +258,16 @@ html[data-theme=neon] .xclose{box-shadow:0 0 12px #5bb98c55}
 .sgsig{background:#fff;color:#111}.sgsig small{color:inherit}.sgsig img{filter:grayscale(1) contrast(1.15)}
 html[data-theme=legacy] .sgsig,html[data-theme=dark] .sgsig,html[data-theme=neon] .sgsig{background:#000;color:#fff}
 html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-theme=neon] .sgsig img{filter:invert(1) grayscale(1)}
+
+/* v7: developer credit - tiny, never part of the layout flow (absolute), so it cannot push or crowd anything */
+.credit{display:inline-flex;align-items:center;gap:7px;font-size:11px;line-height:1.15;letter-spacing:.02em;opacity:.85;pointer-events:none;user-select:none;-webkit-user-select:none}
+.credit img{width:24px;height:24px;border-radius:50%;flex:none;box-shadow:0 0 0 1.5px #5bb98c80}
+.credit span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.credit b{font-weight:800}
+/* sign-in screen: top-left corner, level with the theme button (the card is centred and the top 76px are already reserved) */
+.lcredit{position:absolute;top:calc(14px + env(safe-area-inset-top));left:16px;height:46px;z-index:4;color:var(--ink);max-width:calc(100% - 96px)}
+/* landing page: on the "grass" strip at the bottom of the profile panel (right column on laptops, end of page on tablet / phone) */
+.side .credit{position:absolute;left:8px;right:8px;bottom:3px;justify-content:center;z-index:3;color:#e9f5ef;font-size:10.5px;opacity:.92;text-shadow:0 1px 2px #0b3d3d99}
+.side .credit img{width:20px;height:20px}
+@media(max-width:340px){.lcredit span{font-size:10px}}
+@media(max-height:480px) and (orientation:landscape){.lcredit{top:8px;height:40px}}
+@media print{.credit{display:none!important}}
