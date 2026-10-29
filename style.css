@@ -280,3 +280,6 @@ html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-th
 .tpc{display:grid;gap:8px;margin:8px 0}.tpc label{display:block;font-weight:700;font-size:14px}.tpc input[type=range]{width:100%}
 .tpw{overflow:hidden;background:#8a948f;border-radius:12px;padding:10px;margin:8px 0}.tpw .tpr{position:relative;overflow:hidden}
 .tpg{position:relative;background:#fff;color:#000;box-sizing:border-box;transform-origin:top left;box-shadow:0 2px 10px #0006}.tpb{position:absolute;left:0;right:0;border-top:2px dashed #d33;pointer-events:none}
+
+/* the white paper must cover the whole table when the preview is scrolled sideways */
+.scroll .msx{width:max-content;min-width:100%;box-sizing:border-box}
