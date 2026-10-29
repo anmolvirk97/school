@@ -177,11 +177,17 @@ document.addEventListener("change", e => { const b = e.target.closest("[data-c]"
 document.addEventListener("click", e => { const b = e.target.closest("[data-a]"); if (b && A[b.dataset.a]) { const r = A[b.dataset.a](b, e); if (r && typeof r.then === "function" && !b.classList.contains("ld")) { b.classList.add("ld"); r.then(() => b.classList.remove("ld"), () => b.classList.remove("ld")); } } });
 
 /* ---------- which class/subject pairs can this user touch? (the worker enforces the same rule) ---------- */
+/* ---------- subjects belong to a class: the class incharge decides them (cfg.classSubjects), the admin's list is the default ---------- */
+const classSubList = c => { const x = (S.cfg.classSubjects || {})[c]; return x && Array.isArray(x.list) && x.list.length ? x.list : S.cfg.subjects; };
+const subMode = (c, sub) => ((((S.cfg.classSubjects || {})[c] || {}).mode || {})[sub]) || "marks";   // marks | grade (exams get a grade) | split (exam = theory + assessment)
+const allSubs = () => [...new Set([...S.cfg.subjects, ...Object.values(S.cfg.classSubjects || {}).flatMap(x => x.list || [])])];
+const gradeList = () => S.cfg.grades && S.cfg.grades.length ? S.cfg.grades : ["A+", "A", "B+", "B", "C", "D", "E"];
+const numE = e => !!e && !e.ab && !e.g && e.m != null && e.max > 0;              // an entry that counts as marks (grade entries never do)
 function pairs() {
   const me = S.me, cfg = S.cfg, out = [];
-  const add = (cls, sub) => { if (cfg.classes.includes(cls) && cfg.subjects.includes(sub) && !out.some(p => p.cls === cls && p.sub === sub)) out.push({ cls, sub }); };
-  if (me.role === "admin") cfg.classes.forEach(c => cfg.subjects.forEach(s => add(c, s)));
-  else { if (me.inchargeOf) cfg.subjects.forEach(s => add(me.inchargeOf, s)); (me.assignments || []).forEach(a => add(a.cls, a.sub)); }
+  const add = (cls, sub) => { if (cfg.classes.includes(cls) && classSubList(cls).includes(sub) && !out.some(p => p.cls === cls && p.sub === sub)) out.push({ cls, sub }); };
+  if (me.role === "admin") cfg.classes.forEach(c => classSubList(c).forEach(s => add(c, s)));
+  else { if (me.inchargeOf) classSubList(me.inchargeOf).forEach(s => add(me.inchargeOf, s)); (me.assignments || []).forEach(a => add(a.cls, a.sub)); }
   return out;
 }
 const myClasses = () => [...new Set(pairs().map(p => p.cls))];
@@ -278,7 +284,7 @@ function stats(cls) {
     const mf = D[P.marks(cls, sub)] || {};
     Object.entries(mf.tests || {}).forEach(([tid, t]) => {
       const ms = (mf.marks || {})[tid] || {}, vals = [];
-      Object.entries(ms).forEach(([sid, e]) => { if (!st[sid] || e.ab) return; const p = e.m / e.max * 100; st[sid].pts.push({ x: t.name, y: p, date: t.date, sub, term: !!t.term }); (st[sid].sub[sub] = st[sid].sub[sub] || []).push(p); vals.push(p); });
+      Object.entries(ms).forEach(([sid, e]) => { if (!st[sid] || !numE(e)) return; const p = e.m / e.max * 100; st[sid].pts.push({ x: t.name, y: p, date: t.date, sub, term: !!t.term }); (st[sid].sub[sub] = st[sid].sub[sub] || []).push(p); vals.push(p); });
       tests.push({ sub, tid, name: t.name, date: t.date, max: t.max, n: vals.length, avg: avg(vals) });
     });
     const ch = (D[P.syl(cls, sub)] || {}).chapters || [], tc = ch.filter(taught).length, en = (D[P.nb(cls, sub)] || {}).entries || {};
@@ -311,7 +317,9 @@ const weekIdx = d => Math.floor((d.getTime() / 864e5 + 3) / 7);
 /* ===== Test marks + Notebooks ===== */
 let M = {}, MH = { all: false };
 const mk = sid => getAt(D[M.path] || {}, ["marks", M.tid, sid]);
-const mTxt = e => e.ab ? "Absent" : e.m + "/" + e.max;
+const mTxt = e => e.ab ? "Absent" : e.g ? "Grade " + e.g + (e.m != null ? " · " + e.m + "/" + e.max : "") : e.th != null ? e.m + "/" + e.max + " (" + e.th + " + " + e.as + ")" : e.m + "/" + e.max;
+const tMaxTxt = (t, c, s) => t.term && subMode(c, s) === "grade" ? "graded" : t.amax != null ? `out of ${t.max} (${t.tmax} theory + ${t.amax} assessment)` : `out of ${t.max}`;
+const tLbl = (c, sub, t) => t.term && subMode(c, sub) === "grade" ? "Grade" : "/" + t.max;
 
 V.marks = async host => {
   setTitle("Test marks", "Set the test once, then tap names to enter marks.");
@@ -326,7 +334,7 @@ async function mHist() {
   const path = P.marks(c, s); await load([path], true);
   if (!$("mhist") || $("mc").value !== c || $("ms").value !== s) return;
   const f = D[path] || {}, all = Object.entries(f.tests || {}).sort((a, b) => b[1].date.localeCompare(a[1].date)), list = MH.all ? all : all.slice(0, 5), n = classStudents(c).length;
-  $("mhist").innerHTML = all.length ? `<div class="card"><div class="row between"><b>Test history · ${esc(c)} ${esc(s)}</b>${all.length > 5 ? `<button class="link" data-a="mHAll">${MH.all ? "Show recent" : "Show all " + all.length}</button>` : ""}</div>${list.map(([id, t]) => { const e = Object.keys((f.marks || {})[id] || {}).length; return `<div class="trow"><div><b>${esc(t.name)}</b>${t.term ? " " + pill("Term") : ""}<br><small>${fmtD(t.date)} · out of ${t.max} · ${e}/${n} entered</small></div><div class="row"><button class="btn alt sm" data-a="mResume" data-t="${esc(id)}">Open</button><button class="btn alt sm" data-a="mEditT" data-t="${esc(id)}">Edit</button><button class="btn alt sm" data-a="mDelT" data-t="${esc(id)}">Delete</button></div></div>`; }).join("")}</div>` : "";
+  $("mhist").innerHTML = all.length ? `<div class="card"><div class="row between"><b>Test history · ${esc(c)} ${esc(s)}</b>${all.length > 5 ? `<button class="link" data-a="mHAll">${MH.all ? "Show recent" : "Show all " + all.length}</button>` : ""}</div>${list.map(([id, t]) => { const e = Object.keys((f.marks || {})[id] || {}).length; return `<div class="trow"><div><b>${esc(t.name)}</b>${t.term ? " " + pill("Term") : ""}<br><small>${fmtD(t.date)} · ${tMaxTxt(t, c, s)} · ${e}/${n} entered</small></div><div class="row"><button class="btn alt sm" data-a="mResume" data-t="${esc(id)}">Open</button><button class="btn alt sm" data-a="mEditT" data-t="${esc(id)}">Edit</button><button class="btn alt sm" data-a="mDelT" data-t="${esc(id)}">Delete</button></div></div>`; }).join("")}</div>` : "";
 }
 A.mHAll = () => { MH.all = !MH.all; mHist(); };
 A.mResume = b => busy(b, () => mRun($("mentry"), $("mc").value, $("ms").value, b.dataset.t));
@@ -342,19 +350,24 @@ A.mStart = b => busy(b, async () => {
 async function mRun(host, c, s, tid, quiet, local) {
   const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
-  M = { path, cls: c, sub: s, tid, max: t.max };
-  entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · out of ${t.max} · ${fmtD(t.date)}`,
+  M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
+  entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}`,
     tools: `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
     done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? esc(mTxt(e)) : ""; }, pick: mOpen });
   if (!quiet) host.scrollIntoView({ behavior: "smooth" });
 }
 function mOpen(id) {
-  const s = stuById(id), e = mk(id) || { m: "", max: M.max, r: "" };
-  sheet(`<h2>${esc(s.name)}</h2>${e.ab ? `<p class="sub">Currently marked absent.</p>` : ""}<div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>
+  const s = stuById(id), e = mk(id) || { m: "", max: M.max, r: "" }, md = M.mode, T = M.t || {};
+  let body;
+  if (md === "grade") body = `<p class="sub">Award a grade for this exam. Marks are optional and are not printed on mark sheets or report cards.</p><select id="mg" aria-label="Grade" autofocus><option value="">Choose grade</option>${gradeList().map(g => `<option ${e.g === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><p></p><div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks (optional)" enterkeyhint="done" value="${e.m ?? ""}" placeholder="Marks (optional)"><b>/</b><input class="big" id="mx" type="number" inputmode="decimal" aria-label="Max marks" value="${e.max || M.max || ""}" placeholder="Max"></div>`;
+  else if (md === "split") body = `<p class="sub">Total = theory + assessment (out of ${M.max}). Only the total is printed on mark sheets and report cards.</p><div class="row mid"><label class="fl">Theory<input class="big" id="mth" type="number" inputmode="decimal" value="${e.th ?? ""}" placeholder="0" autofocus></label><b>/ ${T.tmax ?? "?"}</b></div><div class="row mid"><label class="fl">Assessment<input class="big" id="mas" type="number" inputmode="decimal" enterkeyhint="done" value="${e.as ?? ""}" placeholder="0"></label><b>/ ${T.amax ?? "?"}</b></div><p class="sub" id="mtot"></p>`;
+  else body = `<div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>`;
+  sheet(`<h2>${esc(s.name)}</h2>${e.ab ? `<p class="sub">Currently marked absent.</p>` : ""}${body}
    <p><input id="mr" placeholder="Remark (optional)" value="${esc(e.r || "")}" style="width:100%"></p>
    <div class="row"><button class="btn" data-a="mSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="mSkip" data-id="${esc(id)}">Skip</button></div>
    <div class="row"><button class="btn alt sm" data-a="mAbsOne" data-id="${esc(id)}">Absent / did not give test</button>${mk(id) ? `<button class="btn alt sm" data-a="mDelOne" data-id="${esc(id)}">Delete entry</button>` : ""}</div><div class="err" id="e2"></div>`);
-  $("sheet").onkeydown = ev => { if (ev.key === "Enter") A.mSave($("sheet").querySelector("[data-a=mSave]")); };
+  $("sheet").onkeydown = ev => { if (ev.key === "Enter" && ev.target.tagName !== "SELECT") A.mSave($("sheet").querySelector("[data-a=mSave]")); };
+  if (md === "split") { const upd = () => { const a = $("mth").value, b = $("mas").value; $("mtot").textContent = a !== "" || b !== "" ? "Total: " + Math.round(((+a || 0) + (+b || 0)) * 100) / 100 + " / " + M.max : ""; }; ["mth", "mas"].forEach(i => $(i).addEventListener("input", upd)); upd(); }
 }
 A.mSkip = b => { if (!closeSheet()) return; const n = entryNext("m", b.dataset.id); n ? mOpen(n.id) : 0; };
 async function mPut(id, rec) {
@@ -367,11 +380,24 @@ async function mPut(id, rec) {
   entryDraw("m"); const n = entryNext("m", id); dirty = false; n ? mOpen(n.id) : closeSheet(true);
 }
 A.mSave = b => busy(b, async () => {
-  const id = b.dataset.id, v = $("mm").value, mx = +$("mx").value;
-  if (v === "" || +v < 0 || +v > mx) return $("e2").textContent = "Marks must be between 0 and " + mx + ".";
-  return mPut(id, { m: +v, max: mx, r: $("mr").value.trim(), by: S.me.name, t: Date.now() });
+  const id = b.dataset.id, r = $("mr").value.trim(), by = S.me.name, t = Date.now(), er = x => ($("e2").textContent = x);
+  if (M.mode === "grade") {                                        // term exam of a grade subject: grade required, marks optional
+    const g = $("mg").value, v = $("mm").value, mx = +$("mx").value || 0; if (!g) return er("Choose a grade.");
+    const rec = { g }; if (v !== "") { if (!(mx > 0)) return er("Enter the max marks too, or clear the marks."); if (+v < 0 || +v > mx) return er("Marks must be between 0 and " + mx + "."); rec.m = +v; rec.max = mx; }
+    return mPut(id, Object.assign(rec, { r, by, t }));
+  }
+  if (M.mode === "split") {                                        // term exam of a theory + assessment subject
+    const T = M.t || {}, a = $("mth").value, c = $("mas").value;
+    if (!(T.tmax > 0 && T.amax > 0)) return er("This exam has no theory / assessment maximum. Set it again in Term exams → Start entry.");
+    if (a === "" || c === "") return er("Enter both the theory and the assessment marks.");
+    if (+a < 0 || +a > T.tmax) return er("Theory marks must be between 0 and " + T.tmax + "."); if (+c < 0 || +c > T.amax) return er("Assessment marks must be between 0 and " + T.amax + ".");
+    return mPut(id, { th: +a, as: +c, m: Math.round((+a + +c) * 100) / 100, max: M.max, r, by, t });
+  }
+  const v = $("mm").value, mx = +$("mx").value;
+  if (v === "" || +v < 0 || +v > mx) return er("Marks must be between 0 and " + mx + ".");
+  return mPut(id, { m: +v, max: mx, r, by, t });
 });
-A.mAbsOne = b => busy(b, () => mPut(b.dataset.id, { ab: 1, max: +$("mx").value || M.max, r: $("mr").value.trim(), by: S.me.name, t: Date.now() }));
+A.mAbsOne = b => busy(b, () => mPut(b.dataset.id, { ab: 1, max: ($("mx") && +$("mx").value) || M.max || 0, r: $("mr").value.trim(), by: S.me.name, t: Date.now() }));
 A.mDelOne = b => {
   if (!confirm("Delete this student's entry for the test?")) return;
   patchQ(M.path, [{ k: `marks.${M.tid}.${b.dataset.id}`, v: null }], e => { toast("Not deleted: " + e.message, true); if ($("m-ls")) entryDraw("m"); });
@@ -401,17 +427,28 @@ A.mkDel = b => {
 /* edit the test itself: name, date, max marks */
 let ET = {};
 A.mEditT = b => {
-  const path = P.marks($("mc").value, $("ms").value), t = D[path].tests[b.dataset.t]; ET = { path, tid: b.dataset.t, t };
-  sheet(`<h2>Edit test</h2><div class="form"><label>Test name<input id="etn" value="${esc(t.name)}"></label><label>Date<input id="etd" type="date" value="${esc(t.date)}"></label><label>Max marks<input id="etm" type="number" inputmode="decimal" value="${t.max}"></label><label class="cb"><input type="checkbox" id="etu" checked> Also change “out of” on marks already entered</label></div><p></p><div class="row"><button class="btn" data-a="mEditSave" style="flex:2">Save changes</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+  const c = $("mc").value, sb = $("ms").value, path = P.marks(c, sb), t = D[path].tests[b.dataset.t], gr = !!t.term && subMode(c, sb) === "grade", sp = t.amax != null;
+  ET = { path, tid: b.dataset.t, t, gr, sp };
+  const maxF = sp ? `<label>Theory max marks<input id="etth" type="number" inputmode="decimal" value="${t.tmax}"></label><label>Assessment max marks<input id="etas" type="number" inputmode="decimal" value="${t.amax}"></label>` : `<label>Max marks${gr ? " (optional)" : ""}<input id="etm" type="number" inputmode="decimal" value="${t.max > 0 ? t.max : ""}"></label>`;
+  sheet(`<h2>Edit test</h2><div class="form"><label>Test name<input id="etn" value="${esc(t.name)}"></label><label>Date<input id="etd" type="date" value="${esc(t.date)}"></label>${maxF}${sp || gr ? "" : `<label class="cb"><input type="checkbox" id="etu" checked> Also change “out of” on marks already entered</label>`}</div><p></p><div class="row"><button class="btn" data-a="mEditSave" style="flex:2">Save changes</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
 };
 A.mEditSave = b => {
-  const { path, tid, t } = ET, name = $("etn").value.trim(), date = $("etd").value, max = +$("etm").value;
-  if (!name || !date || !(max > 0)) return $("e2").textContent = "Fill in the name, date and max marks.";
-  const ms = (D[path].marks || {})[tid] || {}, ops = [{ k: "tests." + tid, v: Object.assign({}, t, { name, date, max }) }];
-  if (max !== t.max && $("etu").checked) {
-    const over = Object.values(ms).filter(e => !e.ab && e.m > max).length; if (over) return $("e2").textContent = over + " saved marks are higher than " + max + ". Correct them first.";
-    Object.entries(ms).forEach(([sid, e]) => { if (e.max === t.max) ops.push({ k: `marks.${tid}.${sid}`, v: Object.assign({}, e, { max }) }); });
+  const { path, tid, t, gr, sp } = ET, name = $("etn").value.trim(), date = $("etd").value, er = x => ($("e2").textContent = x);
+  if (!name || !date) return er("Fill in the name and date.");
+  const ms = (D[path].marks || {})[tid] || {}, nt = { name, date }, ops = [];
+  if (sp) {
+    const th = +$("etth").value, am = +$("etas").value; if (!(th > 0) || !(am > 0)) return er("Enter the theory and the assessment max marks.");
+    const over = Object.values(ms).filter(e => !e.ab && (e.th > th || e.as > am)).length; if (over) return er(over + " saved entries are higher than the new maximum. Correct them first.");
+    const max = th + am; Object.assign(nt, { max, tmax: th, amax: am });
+    if (max !== t.max) Object.entries(ms).forEach(([sid, e]) => ops.push({ k: `marks.${tid}.${sid}`, v: Object.assign({}, e, { max }) }));
+  } else {
+    const max = +$("etm").value || 0; if (!gr && !(max > 0)) return er("Fill in the max marks."); nt.max = max;
+    if (!gr && max !== t.max && $("etu").checked) {
+      const over = Object.values(ms).filter(e => !e.ab && e.m > max).length; if (over) return er(over + " saved marks are higher than " + max + ". Correct them first.");
+      Object.entries(ms).forEach(([sid, e]) => { if (e.max === t.max) ops.push({ k: `marks.${tid}.${sid}`, v: Object.assign({}, e, { max }) }); });
+    }
   }
+  ops.unshift({ k: "tests." + tid, v: Object.assign({}, t, nt) });
   patchQAll(path, ops, e => { toast("Test not updated: " + e.message, true); mHist(); });
   closeSheet(true); toast("Test updated"); mHist();
   if (M.tid === tid && M.path === path) mRun($("mentry"), M.cls, M.sub, tid, true, true);
@@ -589,7 +626,7 @@ A.tOptCh = () => { if ($("tprev")) tPrev(); };
 
 /* ----- entry: my class and other classes, one subject at a time ----- */
 function tEnter(host) {
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("t")}${termSel()}</div><div class="row"><input id="tmax" type="number" inputmode="decimal" placeholder="Max marks (e.g. 80)" aria-label="Max marks"><input id="tdt" type="date" value="${today()}" aria-label="Exam date"></div><p class="sub" id="tinfo"></p><button class="btn" data-a="tStart">Start entry</button><p class="sub">To correct the exam's date or max marks, or delete it, use Test marks → Test history.</p></div><div id="mentry"></div>`;
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("t")}${termSel()}</div><div class="row"><input id="tmax" type="number" inputmode="decimal" placeholder="Max marks (e.g. 80)" aria-label="Max marks"><input id="tth" class="hide" type="number" inputmode="decimal" placeholder="Theory max (e.g. 70)" aria-label="Theory max marks"><input id="tas" class="hide" type="number" inputmode="decimal" placeholder="Assessment max (e.g. 10)" aria-label="Assessment max marks"><input id="tdt" type="date" value="${today()}" aria-label="Exam date"></div><p class="sub" id="tinfo"></p><button class="btn" data-a="tStart">Start entry</button><p class="sub">To correct the exam's date or max marks, or delete it, use Test marks → Test history.</p></div><div id="mentry"></div>`;
   if (myClasses().includes(TM.c)) $("tc").value = TM.c;
   fillPair("t"); if (subjectsOf($("tc").value).includes(TM.s)) $("ts").value = TM.s;
   A.pairDone_t = tInfo; tInfo();
@@ -598,18 +635,26 @@ async function tInfo() {
   const c = $("tc") && $("tc").value, s = $("ts") && $("ts").value; if (!c || !s) return; TM.c = c; TM.s = s;
   const path = P.marks(c, s); await load([path], true);
   if (!$("tinfo") || $("tc").value !== c || $("ts").value !== s) return;
-  const tid = tTid(TM.term), t = getAt(D[path], ["tests", tid]);
-  if (t) { $("tmax").value = t.max; $("tdt").value = t.date; }
-  $("tinfo").textContent = t ? `${TM.term}: ${Object.keys(getAt(D[path], ["marks", tid]) || {}).length}/${classStudents(c).length} entered · out of ${t.max}.` : `No ${TM.term} marks entered yet for ${c} ${s}.`;
+  const md = subMode(c, s), tid = tTid(TM.term), t = getAt(D[path], ["tests", tid]);
+  $("tmax").classList.toggle("hide", md === "split"); $("tth").classList.toggle("hide", md !== "split"); $("tas").classList.toggle("hide", md !== "split");
+  $("tmax").placeholder = md === "grade" ? "Max marks (optional)" : "Max marks (e.g. 80)";
+  if (t) { $("tmax").value = t.max > 0 ? t.max : ""; $("tth").value = t.tmax ?? ""; $("tas").value = t.amax ?? ""; $("tdt").value = t.date; }
+  const how = md === "grade" ? " This subject is graded in exams: choose a grade for each student (marks optional); only grades are printed." : md === "split" ? " This subject is entered as theory + assessment; only the total is printed." : "";
+  $("tinfo").textContent = (t ? `${TM.term}: ${Object.keys(getAt(D[path], ["marks", tid]) || {}).length}/${classStudents(c).length} entered · ${tMaxTxt(t, c, s)}.` : `No ${TM.term} marks entered yet for ${c} ${s}.`) + how;
 }
 A.tStart = b => busy(b, async () => {
-  const c = $("tc").value, s = $("ts").value, max = +$("tmax").value, date = $("tdt").value;
-  if (!c || !s || !(max > 0) || !date) return toast("Choose class and subject, then enter the max marks.", true);
+  const c = $("tc").value, s = $("ts").value, date = $("tdt").value, md = c && s ? subMode(c, s) : "marks", th = +$("tth").value, am = +$("tas").value;
+  let max = +$("tmax").value;
+  if (!c || !s || !date) return toast("Choose class and subject and the exam date.", true);
+  if (md === "split") { if (!(th > 0) || !(am > 0)) return toast("Enter the theory max and the assessment max.", true); max = th + am; }
+  else if (md === "grade") max = max > 0 ? max : 0;
+  else if (!(max > 0)) return toast("Enter the max marks.", true);
   const path = P.marks(c, s), tid = tTid(TM.term); await load([path], true);
   const t = getAt(D[path], ["tests", tid]);
-  if (!t || t.max !== max || t.date !== date) {
-    if (t && t.max !== max && Object.keys(getAt(D[path], ["marks", tid]) || {}).length && !confirm("Marks are already entered out of " + t.max + ". Change this exam to " + max + "?")) return;
-    patchQ(path, [{ k: "tests." + tid, v: { name: TM.term + " Exam", date, max, term: TM.term, by: (t && t.by) || S.me.name } }], e => { toast("The exam was not saved: " + e.message, true); $("mentry") && ($("mentry").innerHTML = ""); });
+  if (!t || t.max !== max || t.date !== date || (md === "split" && (t.tmax !== th || t.amax !== am))) {
+    if (t && t.max !== max && max > 0 && t.max > 0 && Object.keys(getAt(D[path], ["marks", tid]) || {}).length && !confirm("Marks are already entered out of " + t.max + ". Change this exam to " + max + "?")) return;
+    const rec = { name: TM.term + " Exam", date, max, term: TM.term, by: (t && t.by) || S.me.name }; if (md === "split") { rec.tmax = th; rec.amax = am; }
+    patchQ(path, [{ k: "tests." + tid, v: rec }], e => { toast("The exam was not saved: " + e.message, true); $("mentry") && ($("mentry").innerHTML = ""); });
   }
   await mRun($("mentry"), c, s, tid, false, true); tInfo();
 });
@@ -617,10 +662,10 @@ A.tStart = b => busy(b, async () => {
 /* ----- shared data: one row per student, one column per subject ----- */
 function tData(cls, term) {
   const tid = tTid(term), pass = S.cfg.passPercent;
-  const cols = subjectsOf(cls).map(sub => { const f = D[P.marks(cls, sub)] || {}; return { sub, t: getAt(f, ["tests", tid]), ms: getAt(f, ["marks", tid]) || {} }; }).filter(c => c.t);
+  const cols = subjectsOf(cls).map(sub => { const f = D[P.marks(cls, sub)] || {}; return { sub, mode: subMode(cls, sub), t: getAt(f, ["tests", tid]), ms: getAt(f, ["marks", tid]) || {} }; }).filter(c => c.t);
   const rows = classStudents(cls).map(s => {
     let tot = 0, mx = 0, fail = 0, ab = 0, n = 0;
-    const cells = cols.map(c => { const e = c.ms[s.id]; if (!e) return null; n++; if (e.ab) { ab++; return e; } tot += e.m; mx += e.max; if (e.m / e.max * 100 < pass) fail++; return e; });
+    const cells = cols.map(c => { const e = c.ms[s.id]; if (!e) return null; n++; if (e.ab) { ab++; return e; } if (e.g) return e; tot += e.m; mx += e.max; if (e.m / e.max * 100 < pass) fail++; return e; });
     return { s, cells, tot, mx, n, pct: mx ? tot / mx * 100 : null, res: !n ? "—" : fail ? "Fail" : ab ? "Absent" : n < cols.length ? "Incomplete" : "Pass" };
   });
   const rk = rows.filter(r => r.pct != null).sort((a, b) => b.pct - a.pct); rk.forEach((r, i) => r.rank = i && r.pct === rk[i - 1].pct ? rk[i - 1].rank : i + 1);
@@ -641,10 +686,10 @@ async function tSheet(host) {
 function tPrev() { const h = tSheetHTML(TM.cls, TM.term, tReadOpt()); $("tprev").innerHTML = h ? `<div class="card"><div class="scroll">${h}</div></div>` : `<div class="card empty"><b>No ${esc(TM.term)} marks yet</b><p class="sub">Enter the term marks first (Enter marks tab).</p></div>`; }
 function tSheetHTML(cls, term, o) {
   const d = tData(cls, term); if (!d.cols.length) return "";
-  const col = TCOL[o.col] || TCOL.Teal, avgOf = i => avg(d.rows.map(r => r.cells[i]).filter(e => e && !e.ab).map(e => e.m));
+  const col = TCOL[o.col] || TCOL.Teal, avgOf = i => avg(d.rows.map(r => r.cells[i]).filter(e => e && !e.ab && !e.g).map(e => e.m));
   return `<div class="msx" style="--ac:${col}"><div class="msh">${o.logo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><div>${esc(o.title)} · ${esc(term)} · Class ${esc(cls)}</div></div></div>
-   <table class="pt mst"><tr>${o.roll ? "<th>#</th>" : ""}<th>Student</th>${d.cols.map(c => `<th>${esc(c.sub)}${o.max ? `<br><small>/${c.t.max}</small>` : ""}</th>`).join("")}${o.tot ? "<th>Total</th>" : ""}${o.pct ? "<th>%</th>" : ""}${o.rank ? "<th>Rank</th>" : ""}${o.res ? "<th>Result</th>" : ""}</tr>
-   ${d.rows.map((r, i) => `<tr>${o.roll ? `<td>${i + 1}</td>` : ""}<td>${esc(r.s.name)}</td>${r.cells.map(e => `<td>${!e ? "" : e.ab ? "Ab" : e.m}</td>`).join("")}${o.tot ? `<td>${r.n ? r.tot + "/" + r.mx : ""}</td>` : ""}${o.pct ? `<td>${fmt1(r.pct)}</td>` : ""}${o.rank ? `<td>${r.rank || ""}</td>` : ""}${o.res ? `<td class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</td>` : ""}</tr>`).join("")}
+   <table class="pt mst"><tr>${o.roll ? "<th>#</th>" : ""}<th>Student</th>${d.cols.map(c => `<th>${esc(c.sub)}${o.max ? `<br><small>${c.mode === "grade" ? "Grade" : "/" + c.t.max}</small>` : ""}</th>`).join("")}${o.tot ? "<th>Total</th>" : ""}${o.pct ? "<th>%</th>" : ""}${o.rank ? "<th>Rank</th>" : ""}${o.res ? "<th>Result</th>" : ""}</tr>
+   ${d.rows.map((r, i) => `<tr>${o.roll ? `<td>${i + 1}</td>` : ""}<td>${esc(r.s.name)}</td>${r.cells.map(e => `<td>${!e ? "" : e.ab ? "Ab" : e.g ? esc(e.g) : e.m}</td>`).join("")}${o.tot ? `<td>${r.n ? r.tot + "/" + r.mx : ""}</td>` : ""}${o.pct ? `<td>${fmt1(r.pct)}</td>` : ""}${o.rank ? `<td>${r.rank || ""}</td>` : ""}${o.res ? `<td class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</td>` : ""}</tr>`).join("")}
    <tr class="avr"><td${o.roll ? ' colspan="2"' : ""}><b>Class average</b></td>${d.cols.map((c, i) => `<td>${fmt1(avgOf(i))}</td>`).join("")}${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0) ? `<td colspan="${(o.tot ? 1 : 0) + (o.pct ? 1 : 0) + (o.rank ? 1 : 0) + (o.res ? 1 : 0)}"></td>` : ""}</tr></table>
    ${sigRow(o.sg || sigList())}</div>`;
 }
@@ -662,7 +707,7 @@ async function tCards(host) {
 function miniCard(cls, term, r, d, o, col) {
   return `<div class="mcard" style="--ac:${col}"><div class="mch">${o.clogo && S.logo ? `<img src="${S.logo}" alt="">` : ""}<div><b>${esc(S.cfg.school)}</b><small>Report card · ${esc(term)}</small></div></div>
    <div class="mcn"><b>${esc(r.s.name)}</b><span>Class ${esc(cls)}${r.s.roll ? " · Roll " + esc(r.s.roll) : ""}</span></div>
-   <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.m}</td><td>${c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
+   <table class="pt"><tr><th>Subject</th><th>Marks</th><th>Out of</th></tr>${d.cols.map((c, i) => { const e = r.cells[i]; return `<tr><td>${esc(c.sub)}</td><td>${!e ? "–" : e.ab ? "Ab" : e.g ? esc(e.g) : e.m}</td><td>${(e && e.g) || (c.mode === "grade" && (!e || e.ab)) ? "Grade" : c.t.max}</td></tr>`; }).join("")}<tr><td><b>Total</b></td><td colspan="2"><b>${r.n ? r.tot + " / " + r.mx : "–"}${r.pct != null ? " · " + fmt1(r.pct) + "%" : ""}</b></td></tr></table>
    <div class="mcr">${o.crank && r.rank ? `Rank ${r.rank} ` : ""}${o.cres ? `<b class="${r.res === "Fail" ? "fail" : ""}">${esc(r.res)}</b>` : ""}</div>${o.cremark ? `<div class="mcl">Remarks:</div>` : ""}
    <div class="sig2">${(o.csg || ["Class teacher"]).map(t => sgOne(t, /^class teacher$/i.test(t) && S.sig)).join("")}${o.cpar ? sgOne("Parent") : ""}</div></div>`;
 }
@@ -735,9 +780,9 @@ A.prGo = b => busy(b, async () => {
       let h = `<h3>Marks record</h3>`;
       subs.forEach(sub => {
         const ts = mkTests(sub); h += `<h4>${esc(sub)}</h4>`; if (!ts.length) { h += `<p class="sub">No test held in this period.</p>`; return; }
-        const rows = stu.map(s => { const ps = []; const cells = ts.map(x => { const e = x.ms[s.id]; if (!e) return ""; if (e.ab) return "Ab"; const p = e.m / e.max * 100; ps.push(p); return `<span class="${p < pass ? "fail" : ""}">${e.m}</span>`; }); return tr([esc(s.name), ...cells, ps.length ? `<b>${Math.round(avg(ps))}%</b>` : "—"]); });
-        const foot = `<tr class="avr"><td><b>Class average</b></td>${ts.map(x => { const v = Object.values(x.ms).filter(e => !e.ab).map(e => e.m); return `<td>${v.length ? fmt1(avg(v)) : ""}</td>`; }).join("")}<td></td></tr>`;
-        h += tbl(["Student", ...ts.map(x => `${esc(x.t.name)}<br><small>${fmtD(x.t.date)} · /${x.t.max}</small>`), "Avg %"], [...rows, foot], "mst");
+        const rows = stu.map(s => { const ps = []; const cells = ts.map(x => { const e = x.ms[s.id]; if (!e) return ""; if (e.ab) return "Ab"; if (e.g) return esc(e.g); if (!numE(e)) return ""; const p = e.m / e.max * 100; ps.push(p); return `<span class="${p < pass ? "fail" : ""}">${e.m}</span>`; }); return tr([esc(s.name), ...cells, ps.length ? `<b>${Math.round(avg(ps))}%</b>` : "—"]); });
+        const foot = `<tr class="avr"><td><b>Class average</b></td>${ts.map(x => { const v = Object.values(x.ms).filter(numE).map(e => e.m); return `<td>${v.length ? fmt1(avg(v)) : ""}</td>`; }).join("")}<td></td></tr>`;
+        h += tbl(["Student", ...ts.map(x => `${esc(x.t.name)}<br><small>${fmtD(x.t.date)} · ${tLbl(c, sub, x.t)}</small>`), "Avg %"], [...rows, foot], "mst");
       });
       sec.push(h);
     }
@@ -748,7 +793,7 @@ A.prGo = b => busy(b, async () => {
     if (inch && cats.includes("cr")) {
       const months = Object.keys(FD("attendance", c)).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from), y = ayStart(rg.to), callsIn = callsOf(c).filter(x => inR(x.date));
       const rows = stu.map(s => {
-        const pts = [], nbp = []; subs.forEach(sub => { mkTests(sub).forEach(x => { const e = x.ms[s.id]; if (e && !e.ab) pts.push(e.m / e.max * 100); }); const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, l = nbLatest(sub, s.id); if (l.e && tc) nbp.push(nbDone(l.e, ch) / tc * 100); });
+        const pts = [], nbp = []; subs.forEach(sub => { mkTests(sub).forEach(x => { const e = x.ms[s.id]; if (numE(e)) pts.push(e.m / e.max * 100); }); const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, l = nbLatest(sub, s.id); if (l.e && tc) nbp.push(nbDone(l.e, ch) / tc * 100); });
         let a = 0, lv = 0, any = false; months.forEach(m => { const r = getAt(FD("attendance", c), [m, s.id]); if (r) { any = true; a += r.a || 0; lv += r.l || 0; } });
         const fc = fyCalc(c, y, s.id), fd = fineDue(c, s.id);
         return { cells: [esc(s.name), pts.length, pts.length ? `<b>${Math.round(avg(pts))}%</b>` : "—", nbp.length ? Math.round(avg(nbp)) + "%" : "—", callsIn.filter(x => x.sid === s.id).length, fd ? rupee(fd) : "—", any ? `${a} / ${lv}` : "—", fc.r ? (fc.owedM > 0 ? `<span class="fail">${fyM(fc.owedM)}</span>` : "Up to date") : "—"], avg: pts.length ? avg(pts) : null };
@@ -884,10 +929,38 @@ V.cls = async host => {
 A.cClass = b => { C.cls = b.value; LG = {}; $("cbody").innerHTML = SK; const t = VT; bundleFast(C.cls, () => { if (!stale(t)) cTab(); }); };
 A.cGo = b => { C.tab = b.dataset.t; cTab(); };
 function cTab() {
-  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees", att: "Attendance", stu: "Students" };
+  const T = { mon: "Monitors", fine: "Fines & dues", call: "Parent calls", fee: "Fees", att: "Attendance", stu: "Students", sub: "Subjects" };
   $("ctabs").innerHTML = Object.entries(T).map(([k, v]) => `<button class="${C.tab === k ? "on" : ""}" data-a="cGo" data-t="${k}">${v}</button>`).join("");
-  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee, att: cAtt, stu: cStu })[C.tab]($("cbody"));
+  ({ mon: cMon, fine: cFine, call: cCall, fee: cFee, att: cAtt, stu: cStu, sub: cSub })[C.tab]($("cbody"));
 }
+
+/* ----- subjects of this class: the incharge adds subjects and chooses how exams are marked ----- */
+const SUBMODE = { marks: "Marks (normal)", grade: "Grades in exams", split: "Theory + assessment in exams" };
+let CSU = null;
+function cSub(host) {
+  const c = C.cls; if (!CSU || CSU.cls !== c) CSU = { cls: c, list: classSubList(c).slice(), mode: Object.assign({}, ((S.cfg.classSubjects || {})[c] || {}).mode) };
+  host.innerHTML = `<div class="card"><h3>Subjects of class ${esc(c)}</h3><p class="sub">Add the subjects this class has and choose how each one is marked in <b>term exams</b>. Unit tests are always marked in marks.</p>
+   ${CSU.list.map(s => `<div class="li"><b>${esc(s)}</b><span class="row"><select data-c="csMode" data-s="${esc(s)}" aria-label="Exam marking for ${esc(s)}">${Object.entries(SUBMODE).map(([k, v]) => `<option value="${k}" ${(CSU.mode[s] || "marks") === k ? "selected" : ""}>${v}</option>`).join("")}</select><button class="link" data-a="csDel" data-s="${esc(s)}">Remove</button></span></div>`).join("") || `<p class="sub">No subjects yet.</p>`}
+   <p></p><div class="row"><input id="csn" placeholder="New subject (e.g. Punjabi)" maxlength="12" autocapitalize="words" aria-label="New subject"><button class="btn alt" data-a="csAdd">Add subject</button></div>
+   <p class="sub"><b>Grades in exams</b>: exams get a grade (marks optional) and only the grade is printed on mark sheets and report cards. <b>Theory + assessment</b>: exam marks are entered in two parts; only the total is printed. Names use letters and digits only (up to 12), e.g. SocialSci.</p>
+   <button class="btn" data-a="csSave">Save subjects</button><div class="err" id="cserr"></div></div>`;
+}
+A.csMode = b => { if (CSU) CSU.mode[b.dataset.s] = b.value; };
+A.csDel = b => { if (!confirm("Remove " + b.dataset.s + " from this class? Marks and notebooks already saved are kept, just hidden.")) return; CSU.list = CSU.list.filter(x => x !== b.dataset.s); delete CSU.mode[b.dataset.s]; cSub($("cbody")); };
+A.csAdd = () => {
+  const v = $("csn").value.trim(), er = x => ($("cserr").textContent = x);
+  if (!/^[A-Za-z0-9]{1,12}$/.test(v)) return er("Use letters and digits only, up to 12 characters (e.g. SocialSci).");
+  if (CSU.list.some(x => x.toLowerCase() === v.toLowerCase())) return er(v + " is already in this class.");
+  CSU.list.push(v); cSub($("cbody"));
+};
+A.csSave = b => busy(b, async () => {
+  if (!CSU.list.length) return ($("cserr").textContent = "Keep at least one subject.");
+  const mode = {}; CSU.list.forEach(s => { if (CSU.mode[s] && CSU.mode[s] !== "marks") mode[s] = CSU.mode[s]; });
+  const c = CSU.cls;
+  try { await api("POST", "/class/subjects", { cls: c, list: CSU.list, mode }); S.cfg = await api("GET", "/config"); } catch (x) { return ($("cserr").textContent = x.message); }
+  CSU = null; toast("Subjects saved"); buildNav();
+  if (C.cls === c && $("cbody")) { const t = VT; await bundleFast(c, () => { if (!stale(t) && $("cbody")) cTab(); }); }
+});
 
 /* ----- weekly monitors: automatic round-robin, incharge can override ----- */
 /* ----- weekly monitors: automatic round-robin, incharge can override; every class can have its own categories ----- */
@@ -1316,7 +1389,7 @@ const RC_DEF = { logo: 1, sub: 1, tests: 1, term: 1, nb: 1, fine: 1, fee: 1, att
 const rcOpt = () => { try { return Object.assign({}, RC_DEF, JSON.parse(localStorage.rcopt || "{}")); } catch { return Object.assign({}, RC_DEF); } };
 function termTable(cls, sid, subs) {
   const terms = S.cfg.terms.filter(t => subs.some(s => getAt(D[P.marks(cls, s)] || {}, ["tests", tTid(t)]))); if (!terms.length) return "";
-  const cell = (s, t) => { const e = getAt(D[P.marks(cls, s)] || {}, ["marks", tTid(t), sid]); return !e ? "–" : e.ab ? "Ab" : e.m + "/" + e.max; };
+  const cell = (s, t) => { const e = getAt(D[P.marks(cls, s)] || {}, ["marks", tTid(t), sid]); return !e ? "–" : e.ab ? "Ab" : e.g ? esc(e.g) : e.m + "/" + e.max; };
   return `<h4>Term exams</h4><table class="pt"><tr><th>Subject</th>${terms.map(t => `<th>${esc(t)}</th>`).join("")}</tr>${subs.map(s => `<tr><td>${esc(s)}</td>${terms.map(t => `<td>${cell(s, t)}</td>`).join("")}</tr>`).join("")}</table>`;
 }
 function cardHTML(r, st, o) {
@@ -1374,7 +1447,7 @@ A.uEdit = b => {
    <select id="ur" data-c="uRole" aria-label="Role">${Object.entries({ admin: "Admin (sees and edits everything)", teacher: "Teacher" }).map(([k, v]) => `<option value="${k}" ${(u.role === "admin") === (k === "admin") ? "selected" : ""}>${v}</option>`).join("")}</select>
    <label id="uil" class="${u.role === "admin" ? "hide" : ""}">Class incharge of (optional)<select id="ui"><option value="">Not an incharge</option>${S.cfg.classes.map(c => `<option ${u.inchargeOf === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
    <input id="up" type="password" inputmode="numeric" maxlength="6" placeholder="${isNew ? "PIN (4–6 digits)" : "New PIN (leave blank to keep)"}"></div>
-   <div id="uasg" class="${u.role === "admin" ? "hide" : ""}"><p class="sub">Subjects this teacher teaches. If they are incharge of a class they automatically get every subject of that class, so tick only subjects in other classes.</p>${S.cfg.classes.map(c => `<div class="asg"><b>${esc(c)}</b>${S.cfg.subjects.map(s => `<label class="cb"><input type="checkbox" data-c="${esc(c)}" data-s="${esc(s)}" ${u.assignments.some(a => a.cls === c && a.sub === s) ? "checked" : ""}> ${esc(s)}</label>`).join("")}</div>`).join("")}</div>
+   <div id="uasg" class="${u.role === "admin" ? "hide" : ""}"><p class="sub">Subjects this teacher teaches. If they are incharge of a class they automatically get every subject of that class, so tick only subjects in other classes.</p>${S.cfg.classes.map(c => `<div class="asg"><b>${esc(c)}</b>${classSubList(c).map(s => `<label class="cb"><input type="checkbox" data-c="${esc(c)}" data-s="${esc(s)}" ${u.assignments.some(a => a.cls === c && a.sub === s) ? "checked" : ""}> ${esc(s)}</label>`).join("")}</div>`).join("")}</div>
    <label class="cb"><input type="checkbox" id="ua" ${u.active ? "checked" : ""}> Active (can log in)</label>
    <p></p><div class="row"><button class="btn" data-a="uSave" style="flex:2">Save profile</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
 };
@@ -1421,13 +1494,13 @@ A.sBulkGo = b => busy(b, async () => {
 async function adSettings(host) {
   const c = S.cfg;
   host.innerHTML = `<div class="card" id="shcard"><h3>Google Sheets backup</h3><p class="sub" id="shst">Checking…</p><div class="row"><button class="btn alt" data-a="shTest">Test connection</button><button class="btn" data-a="shSync">Sync all data now</button></div><div class="sub" id="shlog" role="status"></div></div>
-   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Subjects<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
+   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Default subjects (each class starts with these; the class incharge can change their own class under My class → Subjects)<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Exam grades, best to lowest (for grade-only subjects)<input id="cgr" value="${esc(gradeList().join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
   shStatus();
   try { const l = (await api("GET", "/admin/audit")).log.slice(0, 12); $("aud").innerHTML = l.map(x => `<div class="li"><span>${esc(x.who)} ${esc(x.what)}</span><small>${new Date(x.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div>`).join("") || "Nothing yet."; } catch { $("aud").textContent = ""; }
 }
 A.cfgSave = b => busy(b, async () => {
   const l = id => $(id).value.split(",").map(x => x.trim()).filter(Boolean);
-  const config = { school: $("cs").value.trim(), classes: l("cc"), subjects: l("cu"), monitorCategories: l("cm"), terms: l("ct"), signatories: l("cg"), nonEnglishFine: +$("cf").value, passPercent: +$("cp").value };
+  const config = { school: $("cs").value.trim(), classes: l("cc"), subjects: l("cu"), monitorCategories: l("cm"), terms: l("ct"), grades: l("cgr"), signatories: l("cg"), nonEnglishFine: +$("cf").value, passPercent: +$("cp").value };
   try { await api("POST", "/admin/config", { config }); S.cfg = await api("GET", "/config"); toast("Settings saved"); buildNav(); } catch (x) { $("e2").textContent = x.message; }
 });
 
@@ -1447,7 +1520,7 @@ A.shTest = b => busy(b, async () => {
 A.shSync = b => busy(b, async () => {
   if (!confirm("Copy ALL saved records to the Google Sheet now? Existing rows are updated, nothing is duplicated.")) return;
   const jobs = [{ students: true, t: "student list" }];
-  S.cfg.classes.forEach(c => { jobs.push({ cls: c, t: "class " + c + " fines, calls, fees, monitors" }); S.cfg.subjects.forEach(s => jobs.push({ cls: c, sub: s, t: c + " " + s })); });
+  S.cfg.classes.forEach(c => { jobs.push({ cls: c, t: "class " + c + " fines, calls, fees, monitors" }); classSubList(c).forEach(s => jobs.push({ cls: c, sub: s, t: c + " " + s })); });
   let rows = 0;
   for (let i = 0; i < jobs.length; i++) {
     $("shlog").textContent = `Syncing ${jobs[i].t} (${i + 1}/${jobs.length})…`;
@@ -1506,10 +1579,10 @@ A.xGo = b => busy(b, async () => {
     else { const by = {}; document.querySelectorAll(".xsub:checked").forEach(i => (by[i.dataset.cl] = by[i.dataset.cl] || []).push(i.dataset.su)); jobs = Object.entries(by).map(([c, subs]) => ({ c, subs, full: false })); if (!jobs.length) throw new Error("Tick at least one subject."); }
     await loadXlsx();
     const out = {}, add = (name, h, row) => (out[name] = out[name] || { h, rows: [] }).rows.push(row);
-    const H = { test: ["Class", "Subject", "Test", "Date", "Student", "Marks", "Out of", "Percent", "Remark", "Entered by", "Type"], nb: ["Class", "Subject", "Date", "Student", "Chapters done", "Chapters checked", "Percent", "Chapter details", "Remark", "Entered by"],
+    const H = { test: ["Class", "Subject", "Test", "Date", "Student", "Marks", "Out of", "Percent", "Remark", "Entered by", "Type", "Grade", "Theory", "Assessment"], nb: ["Class", "Subject", "Date", "Student", "Chapters done", "Chapters checked", "Percent", "Chapter details", "Remark", "Entered by"],
       fee: ["Class", "Year", "Student", "Total fee", "Paid", "Due", ...MN, "Status", "Entered by"], att: ["Class", "Month", "Student", "Working days", "Absent days", "Leaves", "Entered by"], call: ["Class", "Student", "Date", "Parent's response", "Remark", "Entered by", "Type", "Pay by", "Grievance", "Grievance status", "Resolved on", "Resolution"],
       fine: ["Class", "Student", "Date", "Type", "Amount", "Paid", "Paid on", "Remark", "Entered by"] };
-    const all = S.cfg.subjects, HC = ["Class", "Student", "Tests taken", "Average %", ...all.map(s => s + " %"), "Notebook checks", "Notebook %", "Calls made", "Last call", "Last response", "Fines added", "Fines pending now", "Fee paid (amount entered)", "Fee due (amount entered)"];
+    const all = allSubs(), HC = ["Class", "Student", "Tests taken", "Average %", ...all.map(s => s + " %"), "Notebook checks", "Notebook %", "Calls made", "Last call", "Last response", "Fines added", "Fines pending now", "Fee paid (amount entered)", "Fee due (amount entered)"];
     for (const { c, subs: sl, full } of jobs) {
       toast("Collecting class " + c + "…");
       await load([...sl.flatMap(s => [P.marks(c, s), P.nb(c, s), P.syl(c, s)]), ...(full ? ["fines", "calls", "fees", "attendance"].map(k => P.k(k, c)) : [])], true);
@@ -1519,8 +1592,8 @@ A.xGo = b => busy(b, async () => {
         const mf = D[P.marks(c, sub)] || {}, ch = (D[P.syl(c, sub)] || {}).chapters || [], en = (D[P.nb(c, sub)] || {}).entries || {}, tc = ch.filter(taught).length;
         Object.entries(mf.tests || {}).filter(([, t]) => inR(t.date)).sort((a, z) => a[1].date.localeCompare(z[1].date)).forEach(([tid, t]) => stu.forEach(s => {
           const e = getAt(mf, ["marks", tid, s.id]), ok = e && !e.ab;
-          if (sets.has("test")) add("Test record", H.test, [c, sub, t.name, t.date, s.name, ok ? e.m : "", e ? e.max : t.max, ok ? pc(e.m, e.max) : "", e ? (e.ab ? "Absent" : e.r || "") : "Not entered", e ? e.by || "" : "", t.term ? "Term" : "Unit"]);
-          if (ok) { const p = e.m / e.max * 100; acc[s.id].pts.push(p); (acc[s.id].sub[sub] = acc[s.id].sub[sub] || []).push(p); }
+          if (sets.has("test")) add("Test record", H.test, [c, sub, t.name, t.date, s.name, ok ? (e.m ?? "") : "", e ? (e.max ?? t.max ?? "") : (t.max ?? ""), ok && numE(e) ? pc(e.m, e.max) : "", e ? (e.ab ? "Absent" : e.r || "") : "Not entered", e ? e.by || "" : "", t.term ? "Term" : "Unit", ok ? (e.g || "") : "", ok && e.th != null ? e.th : "", ok && e.th != null ? e.as : ""]);
+          if (numE(e)) { const p = e.m / e.max * 100; acc[s.id].pts.push(p); (acc[s.id].sub[sub] = acc[s.id].sub[sub] || []).push(p); }
         }));
         Object.keys(en).filter(inR).sort().forEach(d => stu.forEach(s => {
           const e = en[d][s.id]; if (!e) return; const done = nbDone(e, ch);
@@ -1556,9 +1629,9 @@ let IMP = null;
 const nd = v => { if (typeof v === "number") return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10); const s = String(v).trim(); let m = /^\d{4}-\d{2}-\d{2}/.exec(s); if (m) return m[0]; m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(s); return m ? `${m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}` : ""; };
 const nk = n => String(n ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 const cc = v => S.cfg.classes.find(c => nk(c) === nk(v)) || String(v ?? "").replace(/\s+/g, " ").trim();
-const cs = v => S.cfg.subjects.find(c => nk(c) === nk(v)) || String(v ?? "").replace(/\s+/g, " ").trim();
+const cs = v => allSubs().find(c => nk(c) === nk(v)) || String(v ?? "").replace(/\s+/g, " ").trim();
 const impStu = (c, n, alias) => { const a = alias[c + "|" + nk(n)]; if (a) return a === "skip" ? undefined : stuById(a); return classStudents(c).find(s => nk(s.name) === nk(n)); };
-const whyNo = (c, sb) => !S.cfg.classes.includes(c) ? `class “${c}” does not exist` : !S.cfg.subjects.includes(sb) ? `subject “${sb}” does not exist` : `${c} ${sb}: you are not assigned to this subject`;
+const whyNo = (c, sb) => !S.cfg.classes.includes(c) ? `class “${c}” does not exist` : !allSubs().includes(sb) ? `subject “${sb}” does not exist` : `${c} ${sb}: you are not assigned to this subject`;
 const whyInch = (c, what) => !S.cfg.classes.includes(c) ? `class “${c}” does not exist` : `${c}: ${what} can be imported by the class incharge only`;
 const chapterPairs = t => String(t ?? "").split(";").map(x => { const i = x.lastIndexOf(":"); return i > 0 ? [x.slice(0, i).trim(), x.slice(i + 1).trim()] : null; }).filter(x => x && x[0]);
 const stCode = t => { const v = nk(t); if (["done", "complete", "completed", "full", "yes", "✔", "✓"].includes(v)) return 1; if (["partial", "half", "part", "incomplete"].includes(v)) return 2; if (["pending", "not done", "no", "", "✘", "✗", "x"].includes(v)) return 0; return null; };
@@ -1571,19 +1644,21 @@ async function impPlan(wb, alias = {}, chAlias = {}) {
   const canSub = (c, s) => pairs().some(p => p.cls === c && p.sub === s), canInch = c => inchargeClasses().includes(c), skip = m => bad.add(m);
   const str = v => String(v ?? "").trim();
   for (const r of rows("Test record")) {
-    const c = cc(r.Class), sb = cs(r.Subject), name = str(r.Test), date = nd(r.Date), rem = str(r.Remark), absent = rem.toLowerCase() === "absent", max = +r["Out of"];
+    const c = cc(r.Class), sb = cs(r.Subject), name = str(r.Test), date = nd(r.Date), rem = str(r.Remark), absent = rem.toLowerCase() === "absent", max = +r["Out of"], grade = str(r.Grade);
     if (!canSub(c, sb)) { skip(whyNo(c, sb)); continue; }
     const s = stu(c, r.Student); if (!s) { skip(`student “${str(r.Student)}” not found in ${c}`); continue; }
-    if (rem.toLowerCase() === "not entered" || (r.Marks === "" && !absent)) continue;
+    if (rem.toLowerCase() === "not entered" || (r.Marks === "" && !absent && !grade)) continue;
     if (!name) { skip(`a test row for ${s.name} has no test name`); continue; }
     if (!date) { skip(`test “${name}”: unreadable date “${str(r.Date)}”`); continue; }
-    if (!(max > 0)) { skip(`test “${name}”: “Out of” is missing`); continue; }
-    if (!absent && !(+r.Marks >= 0 && +r.Marks <= max)) { skip(`${s.name} in “${name}”: marks “${str(r.Marks)}” are not between 0 and ${max}`); continue; }
+    if (!(max > 0) && !grade) { skip(`test “${name}”: “Out of” is missing`); continue; }
+    if (!absent && !grade && !(+r.Marks >= 0 && +r.Marks <= max)) { skip(`${s.name} in “${name}”: marks “${str(r.Marks)}” are not between 0 and ${max}`); continue; }
+    const gm = grade ? gradeList().find(x => nk(x) === nk(grade)) : null; if (grade && !gm) { skip(`${s.name} in “${name}”: grade “${grade}” is not in the grades list (Admin → Settings)`); continue; }
     const path = P.marks(c, sb), f = await ld(path), isT = nk(r.Type) === "term", term = isT ? S.cfg.terms.find(t => nk(name) === nk(t + " Exam") || nk(name) === nk(t)) : null; let tid, t;
     if (isT && !term) note(`Term exam “${name}” is not in the Exam terms list, so it was imported as a normal test`);
     if (term) { tid = tTid(term); t = getAt(f, ["tests", tid]); } else { const e = Object.entries(f.tests || {}).find(([, x]) => !x.term && x.name.toLowerCase() === name.toLowerCase() && x.date === date); if (e) [tid, t] = e; else tid = slug(name) + "_" + date; }
     if (!t && !made.has(path + tid)) { made.add(path + tid); put(path, { k: "tests." + tid, v: Object.assign({ name, date, max, by }, term ? { term } : {}) }); }
-    put(path, { k: `marks.${tid}.${s.id}`, v: absent ? { ab: 1, max, r: "", by, t: now } : { m: +r.Marks, max, r: rem, by, t: now } }, "Test marks");
+    const th = str(r.Theory), asm = str(r.Assessment), mx0 = max > 0 ? max : 0, hasM = r.Marks !== "" && mx0 > 0 && +r.Marks >= 0 && +r.Marks <= mx0;
+    put(path, { k: `marks.${tid}.${s.id}`, v: absent ? { ab: 1, max: mx0, r: "", by, t: now } : gm ? Object.assign({ g: gm }, hasM ? { m: +r.Marks, max: mx0 } : {}, { r: rem, by, t: now }) : Object.assign({ m: +r.Marks, max }, th !== "" && asm !== "" && !isNaN(+th) && !isNaN(+asm) ? { th: +th, as: +asm } : {}, { r: rem, by, t: now }) }, "Test marks");
   }
   for (const r of rows("Notebook record")) {
     const c = cc(r.Class), sb = cs(r.Subject), date = nd(r.Date);
