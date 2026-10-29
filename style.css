@@ -271,3 +271,12 @@ html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-th
 @media(max-width:340px){.lcredit span{font-size:10px}}
 @media(max-height:480px) and (orientation:landscape){.lcredit{top:8px;height:40px}}
 @media print{.credit{display:none!important}}
+
+/* mark sheet = a white sheet of paper (readable in night mode too); size controls come from CSS variables */
+.msx{background:#fff;color:#000}.msx .pt td,.msx .pt .avr td{color:#000}.scroll .msx{padding:10px;border-radius:10px}
+.msx .mst{width:var(--tw,100%);margin:8px auto;font-size:var(--fs,13px)}.msx .mst th,.msx .mst td{font-size:var(--fs,13px);padding:var(--rh,5px) 6px}
+.msx .msh b{font-size:calc(var(--fs,13px) * 1.5)}.msx .msh>div{font-size:var(--fs,13px)}
+@media(min-width:700px) and (min-height:560px){.sheet.wide{max-width:980px}}
+.tpc{display:grid;gap:8px;margin:8px 0}.tpc label{display:block;font-weight:700;font-size:14px}.tpc input[type=range]{width:100%}
+.tpw{overflow:hidden;background:#8a948f;border-radius:12px;padding:10px;margin:8px 0}.tpw .tpr{position:relative;overflow:hidden}
+.tpg{position:relative;background:#fff;color:#000;box-sizing:border-box;transform-origin:top left;box-shadow:0 2px 10px #0006}.tpb{position:absolute;left:0;right:0;border-top:2px dashed #d33;pointer-events:none}
