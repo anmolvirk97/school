@@ -63,7 +63,7 @@ const busy = async (btn, fn) => { BUSYN++; if (btn) { btn.disabled = true; btn.c
 /* ---------- API + offline queue ---------- */
 async function api(method, path, body) {
   let r;
-  const hdr = { "Content-Type": "application/json", Authorization: "Bearer " + token }; if (BG > 0) hdr["X-Bg"] = "1"; else lastAct = Date.now();      // background refreshes do not count as activity
+  const hdr = { "Content-Type": "application/json", Authorization: "Bearer " + token }; if (BG > 0) hdr["X-Bg"] = "1"; else { lastAct = Date.now(); lastPing = lastAct; }      // background refreshes do not count as activity
   try { r = await fetch(WORKER_URL + path, { method, headers: hdr, body: body ? JSON.stringify(body) : undefined }); }
   catch (e) { throw Object.assign(new Error("You are offline."), { offline: true }); }
   const j = await r.json().catch(() => ({}));
@@ -84,14 +84,29 @@ async function flushQueue() {
 addEventListener("online", () => { syncBadge(); flushQueue(); }); addEventListener("offline", syncBadge); setInterval(() => { BG++; try { flushQueue(); } finally { BG--; } }, 20000);
 
 /* ---------- data files: cached, offline-aware, edited with safe patches ---------- */
-async function load(paths, force) {
-  const need = paths.filter(p => (force || !(p in D)) && !(typeof PQ !== "undefined" && PQ[p] && (PQ[p].busy || PQ[p].items.length)));
+/* SHA[path] = the version of that file we hold; FT[path] = when the server last confirmed it is current.
+   A refresh sends the versions; the server answers "unchanged" for files that did not change, so nothing is downloaded, parsed or re-saved for them. */
+const SHA = {}, FT = {};
+const fresh = (ps, ttl) => ps.every(p => FT[p] && Date.now() - FT[p] < ttl);
+async function loadX(paths, force) {
+  const need = paths.filter(p => (force || !(p in D)) && !(typeof PQ !== "undefined" && PQ[p] && (PQ[p].busy || PQ[p].items.length))), changed = [];
   if (need.length) {
-    try { const r = await api("POST", "/bulk", { paths: need }); need.forEach(p => { D[p] = r[p] || {}; try { localStorage["c_" + p] = JSON.stringify(D[p]); } catch { } }); }
+    try {
+      const have = {}; need.forEach(p => { if (SHA[p] && p in D) have[p] = SHA[p]; });
+      const r = await api("POST", "/bulk", { paths: need, have }), docs = r.d || r, ver = r.v || {}, same = new Set(r.same || []), now = Date.now();
+      need.forEach(p => {
+        if (same.has(p) && p in D) { FT[p] = now; return; }
+        const nd = docs[p] || {};
+        if (!(p in D) || JSON.stringify(D[p]) !== JSON.stringify(nd)) { changed.push(p); D[p] = nd; try { localStorage["c_" + p] = JSON.stringify(nd); } catch { } }
+        if (ver[p]) { SHA[p] = ver[p]; try { localStorage["h_" + p] = ver[p]; } catch { } }
+        FT[p] = now;
+      });
+    }
     catch (e) { if (!e.offline) throw e; need.forEach(p => { try { D[p] = JSON.parse(localStorage["c_" + p]); } catch { D[p] = {}; } }); toast("Offline - showing the last saved copy"); }
   }
-  return paths.map(p => D[p]);
+  return { docs: paths.map(p => D[p]), changed };
 }
+const load = async (paths, force) => (await loadX(paths, force)).docs;
 const getAt = (o, ks) => ks.reduce((x, k) => x == null ? undefined : x[k], o);
 function setAt(path, k, v) {
   const o = D[path] || (D[path] = {}), ks = k.split("."), last = ks.pop();
@@ -232,11 +247,12 @@ const SK = `<div class="skw" aria-busy="true" aria-label="Loading"><div class="s
 function bundlePaths(cls) { const p = []; subjectsOf(cls).forEach(s => p.push(P.marks(cls, s), P.nb(cls, s), P.syl(cls, s))); if (inchargeClasses().includes(cls)) ["fines", "calls", "fees", "monitors", "attendance"].forEach(k => p.push(P.k(k, cls))); return p; }
 async function bundleFast(cls, render, quiet) {
   const paths = bundlePaths(cls);
-  paths.forEach(p => { if (!(p in D)) { try { const c = localStorage["c_" + p]; if (c) D[p] = JSON.parse(c); } catch { } } });
-  const had = paths.every(p => p in D), before = paths.map(p => JSON.stringify(D[p]));
+  paths.forEach(p => { if (!(p in D)) { try { const c = localStorage["c_" + p]; if (c) { D[p] = JSON.parse(c); SHA[p] = localStorage["h_" + p] || ""; } } catch { } } });
+  const had = paths.every(p => p in D);
   if (had && !quiet) render();
-  try { await load(paths, true); } catch (e) { if (!had) throw e; return; }
-  if (!had || paths.some((p, i) => JSON.stringify(D[p]) !== before[i])) render();
+  if (had && fresh(paths, quiet ? 40000 : 30000)) return;          // the server confirmed these files a moment ago: no request at all
+  let res; try { res = await loadX(paths, true); } catch (e) { if (!had) throw e; return; }
+  if (!had || res.changed.length) render();
 }
 /* keep the keyboard from covering the entry card (phones/tablets) */
 if (window.visualViewport) {
@@ -756,10 +772,17 @@ A.prGo = b => busy(b, async () => {
 
 /* ===== extras.js ===== */
 /* ----- school logo + teacher signature (stored on the server, cached on the device) ----- */
-async function loadAssets() {
+function loadAssets(pre) {
   S.logo = localStorage.logo || ""; S.sig = localStorage["sig_" + S.me.username] || "";
-  try { S.logo = (await api("GET", "/logo")).img || ""; localStorage.logo = S.logo; } catch { }
-  try { S.sig = (await api("GET", "/sig")).img || ""; localStorage["sig_" + S.me.username] = S.sig; } catch { }
+  if (pre && pre.sig !== undefined) {                                  // the sign-in / boot answer already carries them (the logo only when ours is out of date)
+    if (pre.logo !== undefined) { S.logo = pre.logo; try { localStorage.logo = pre.logo; localStorage.logoh = pre.logoh || ""; } catch { } }
+    S.sig = pre.sig; try { localStorage["sig_" + S.me.username] = pre.sig; } catch { }
+    return;
+  }
+  return (async () => {                                                // older server: ask separately
+    try { S.logo = (await api("GET", "/logo")).img || ""; localStorage.logo = S.logo; } catch { }
+    try { S.sig = (await api("GET", "/sig")).img || ""; localStorage["sig_" + S.me.username] = S.sig; } catch { }
+  })();
 }
 function imgPick(max, cb) {
   const i = document.createElement("input"); i.type = "file"; i.accept = "image/*";
@@ -791,7 +814,7 @@ A.sigDraw = () => {
 };
 A.sigClr = () => { const c = $("sgc"); c.getContext("2d").clearRect(0, 0, c.width, c.height); SG.drew = false; };
 A.sigSave = () => { if (!SG.drew) return toast("Draw your signature first.", true); sigSend($("sgc").toDataURL("image/png")); };
-const logoSend = async img => { try { await api("POST", "/admin/logo", { img }); S.logo = img; localStorage.logo = img; toast(img ? "Logo saved" : "Logo removed"); adSettings($("adb")); } catch (x) { toast(x.message, true); } };
+const logoSend = async img => { try { await api("POST", "/admin/logo", { img }); S.logo = img; localStorage.logo = img; localStorage.logoh = ""; toast(img ? "Logo saved" : "Logo removed"); adSettings($("adb")); } catch (x) { toast(x.message, true); } };
 A.logoUp = () => imgPick(300, logoSend);
 A.logoDel = () => logoSend("");
 
@@ -1764,7 +1787,7 @@ A.thNight = b => { TH.night = b.dataset.k; if (TH.mode === "day") TH.mode = "sys
 A.thTime = () => { TH.from = $("thf").value || TH.from; TH.to = $("tht").value || TH.to; themeSave(); };
 
 /* ===== session guard: activity tracking, 1-minute idle sign-out (10 s warning), wipe of local data on every sign-out ===== */
-const IDLE_MS = 60000, WARN_S = 10, KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "rcopt", "tmOpt"];
+const IDLE_MS = 60000, WARN_S = 10, KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt"];
 let lastAct = Date.now(), lastPing = 0, BG = 0, BUSYN = 0, outBusy = false, printing = false;
 const wipeLocal = () => { try { Object.keys(localStorage).forEach(k => { if (!KEEP_KEYS.includes(k) && !k.startsWith("theme_")) localStorage.removeItem(k); }); sessionStorage.removeItem("tok"); } catch { } };
 function endSession(msg) { token = ""; wipeLocal(); try { if (msg) sessionStorage.msg = msg; } catch { } location.reload(); }
@@ -1775,7 +1798,7 @@ function deviceLabel() {
 }
 function actHandler() {
   if (!token || !S.me) return; const now = Date.now(); lastAct = now; if (!$("idle").classList.contains("hide")) hideIdle();
-  if (now - lastPing > 3000) { lastPing = now; api("POST", "/session/ping", {}).catch(() => { }); }          // tells the server this profile is in use right now
+  if (now - lastPing > 20000) { lastPing = now; api("POST", "/session/ping", {}).catch(() => { }); }          // tells the server this profile is in use right now
 }
 ["pointerdown", "pointermove", "keydown", "touchstart", "touchmove", "wheel", "scroll", "input", "click"].forEach(ev => addEventListener(ev, actHandler, { passive: true, capture: true }));
 addEventListener("beforeprint", () => { printing = true; lastAct = Date.now(); }); addEventListener("afterprint", () => { printing = false; lastAct = Date.now(); });
@@ -1832,7 +1855,7 @@ async function doLogin(force) {
   const uname = (sel || $("user").value).trim().toLowerCase(); $("err").textContent = "";
   if (!uname) return $("err").textContent = "Enter your username.";
   if (pin.length < 4) return $("err").textContent = "PIN must be 4 to 6 digits.";
-  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
+  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true, lh: localStorage.logoh || "" }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
   catch (x) { if (x.code === "active_elsewhere") return takeoverAsk(x.other); $("err").textContent = x.message; pin = ""; drawPad(); }
 }
 $("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
@@ -1850,10 +1873,10 @@ lnoteShow();
 /* while the person is still choosing a profile / typing a username, the server loads everything the sign-in needs, so pressing Go only has to check the PIN */
 const warmed = {};
 function loginWarm(u) {
-  u = String(u || "").trim().toLowerCase(); if (u.length < 2 || Date.now() - (warmed[u] || 0) < 15000) return; warmed[u] = Date.now();
+  u = String(u || "").trim().toLowerCase(); if (u.length < 3 || document.hidden || Date.now() - (warmed[u] || 0) < 45000) return; warmed[u] = Date.now();
   api("POST", "/login/warm", { username: u }).then(r => { if (r && r.wait > 0 && (sel || $("user").value.trim().toLowerCase()) === u) $("err").textContent = `This profile is locked for ${r.wait > 90 ? Math.ceil(r.wait / 60) + " minutes" : r.wait + " seconds"}.`; }).catch(() => { });
 }
-let warmT = 0; $("user").addEventListener("input", () => { clearTimeout(warmT); warmT = setTimeout(() => loginWarm($("user").value), 450); });
+let warmT = 0; $("user").addEventListener("input", () => { clearTimeout(warmT); warmT = setTimeout(() => loginWarm($("user").value), 800); });
 addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
 
 /* ----- start / shell ----- */
@@ -1861,8 +1884,8 @@ async function start(pre) {
   if (pre && pre.config && pre.students) { S.cfg = pre.config; S.students = pre.students; } else [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);   // a fresh sign-in already brings both
 
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("avb").textContent = S.me.name[0].toUpperCase();
-  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); buildNav(); renderSide(); go("home"); loadAssets(); flushQueue(); syncBadge();
-  setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 800);   // warm up the incharge screens
+  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); loadAssets(pre); buildNav(); renderSide(); go("home"); flushQueue(); syncBadge();
+  setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 3000);   // warm up the incharge screens
 }
 function buildNav() {
   const items = [["home", "home", "Home"], ["marks", "marks", "Test marks"], ["term", "cap", "Term exams"], ["nb", "book", "Notebooks"]];
@@ -1904,10 +1927,11 @@ const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMa
  <g><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><polygon points="150,88 170,95 150,102" fill="#e2574c"/>
  ${[104, 124, 166, 186].map(x => `<rect x="${x}" y="164" width="14" height="18" rx="2" fill="#2d8a7a"/>`).join("")}<rect x="140" y="186" width="20" height="26" rx="3" fill="#0b4a4a"/>${[78, 206].map(x => `<rect x="${x}" y="182" width="14" height="14" rx="2" fill="#2d8a7a"/>`).join("")}</g>
  <g><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></svg>`;
+const CREDIT = `<div class="credit"><img src="logo.svg" alt="" width="24" height="24" decoding="async"><span>Designed by <b>Anmol Virk</b></span></div>`;
 function renderSide() {
   const cls = myClasses().includes(H.cls) ? H.cls : myClasses()[0];
   $("side").innerHTML = `<div class="sp"><div class="av big2">${esc(S.me.name[0].toUpperCase())}</div><b>${esc(S.me.name)}</b><small>${esc(roleLine())}</small><button class="btn pillbtn" data-a="profile">${ic("edit", 16)} Edit profile</button>
-   <div class="sbox"><small>Class</small><b>${cls ? esc(cls) : "—"}</b><span class="arrow">${esc(todayLabel())}</span></div></div><h2 class="sch">${esc(S.cfg.school)}</h2>${SKY}`;
+   <div class="sbox"><small>Class</small><b>${cls ? esc(cls) : "—"}</b><span class="arrow">${esc(todayLabel())}</span></div></div><h2 class="sch">${esc(S.cfg.school)}</h2>${SKY}${CREDIT}`;
 }
 const todayLabel = () => new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 $("avb").onclick = () => A.profile();
@@ -1952,16 +1976,16 @@ A.hCls = b => { H.cls = b.dataset.c; V.home($("view")); };
 /* ----- auto-sync: other teachers' entries appear in the incharge's screens without reloading ----- */
 const refreshView = () => { BG++; try { refreshViewInner(); } finally { BG--; } };
 function refreshViewInner() {
-  if (document.hidden || !token || !S.me || !$("sheet").classList.contains("hide")) return;
+  if (document.hidden || !navigator.onLine || !token || !S.me || !$("sheet").classList.contains("hide")) return;
   if (document.activeElement && document.activeElement.matches("input,select,textarea")) return;
   const t = VT, ok = () => !stale(t);
   if (cur === "home" && H.cls) bundleFast(H.cls, () => ok() && homeDraw($("view")), true).catch(() => { });
   else if (cur === "cls" && C.cls) bundleFast(C.cls, () => ok() && $("cbody") && cTab(), true).catch(() => { });
   else if (cur === "ins" && I.cls) bundleFast(I.cls, () => ok() && $("ibody") && iTab(), true).catch(() => { });
-  else if (cur === "marks" && M.path && $("m-ls")) { const b = JSON.stringify(D[M.path]); load([M.path], true).then(() => { if (ok() && JSON.stringify(D[M.path]) !== b) entryDraw("m"); }).catch(() => { }); }
-  else if (cur === "nb" && N.ep && $("n-ls")) { const b = JSON.stringify(D[N.ep]); load([N.ep], true).then(() => { if (ok() && JSON.stringify(D[N.ep]) !== b) entryDraw("n"); }).catch(() => { }); }
+  else if (cur === "marks" && M.path && $("m-ls")) { if (!fresh([M.path], 40000)) loadX([M.path], true).then(r => { if (ok() && r.changed.length) entryDraw("m"); }).catch(() => { }); }
+  else if (cur === "nb" && N.ep && $("n-ls")) { if (!fresh([N.ep], 40000)) loadX([N.ep], true).then(r => { if (ok() && r.changed.length) entryDraw("n"); }).catch(() => { }); }
 }
-setInterval(refreshView, 60000); document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshView(); });
+setInterval(refreshView, 75000); document.addEventListener("visibilitychange", () => { if (!document.hidden) refreshView(); });
 
 /* ----- admin student screen: same instant add / edit / archive as the class incharge ----- */
 A.sSave = b => {
@@ -1981,4 +2005,4 @@ A.sDel = b => { const s = stuById(b.dataset.id); if (!s || !confirm(`Remove ${s.
 /* ----- boot ----- */
 renderAcct(); drawPad(); document.querySelector(".gi").innerHTML = ic("search", 18);
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => { });
-if (token) api("GET", "/me").then(r => { S.me = r; return start(); }).catch(() => { });
+if (token) api("GET", "/boot?lh=" + encodeURIComponent(localStorage.logoh || "")).then(r => { S.me = r.user; return start(r); }).catch(e => { if (e.message === "Not found.") return api("GET", "/me").then(r => { S.me = r; return start(); }).catch(() => { }); });
