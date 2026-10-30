@@ -188,7 +188,8 @@ function pairs() {
   const add = (cls, sub) => { if (cfg.classes.includes(cls) && classSubList(cls).includes(sub) && !out.some(p => p.cls === cls && p.sub === sub)) out.push({ cls, sub }); };
   if (me.role === "admin") cfg.classes.forEach(c => classSubList(c).forEach(s => add(c, s)));
   else { if (me.inchargeOf) classSubList(me.inchargeOf).forEach(s => add(me.inchargeOf, s)); (me.assignments || []).forEach(a => add(a.cls, a.sub)); }
-  return out;
+  const cr = [...new Set(out.map(p => p.cls))];
+  return out.sort((a, b) => cr.indexOf(a.cls) - cr.indexOf(b.cls) || classSubList(a.cls).indexOf(a.sub) - classSubList(b.cls).indexOf(b.sub));
 }
 const myClasses = () => [...new Set(pairs().map(p => p.cls))];
 const inchargeClasses = () => S.me.role === "admin" ? S.cfg.classes : (S.me.inchargeOf ? [S.me.inchargeOf] : []);
@@ -547,17 +548,41 @@ A.chSave = b => busy(b, async () => {
   N.ch = ch; closeSheet(true); toast("Chapters saved"); nbDraw();
 });
 function nOpenStu(id) {
-  const e = ne(id); NS = { id, st: N.ch.map((c, i) => e ? (e.s[i] || 0) : 0), cr: Object.assign({}, e && e.cr), r: e ? e.r || "" : "", detail: NS.detail || false };
+  const e = ne(id); NS = { id, st: N.ch.map((c, i) => e ? (e.s[i] || 0) : 0), cr: Object.assign({}, e && e.cr), r: e ? e.r || "" : "", detail: NS.detail || false, rem: false };
   sheet(""); nsDraw();
 }
 function nsDraw() {
+  if (NS.rem) return nsRemDraw();
   const s = stuById(NS.id), t = N.ch.map((c, i) => c).filter(taught).length;
   $("sheet").innerHTML = `<div class="row between"><h2>${esc(s.name)}</h2><button class="link" data-a="nsMode">${NS.detail ? "Quick strip" : "Individual entry"}</button></div><p class="sub">${fmtD(N.date)} · ${esc(N.sub)} · ${NS.detail ? "Set each chapter and add remarks" : "Tap a chapter to cycle done → partial → pending"}</p>${(() => { const p = ne(NS.id) ? null : nPrev(NS.id); return p ? `<p class="sub">Last checked ${esc(fmtD(p.d))}: ${nbDone(p.e, N.ch)}/${N.ch.filter(taught).length} chapters done. Use “Same as last entry” to start from it.</p>` : ""; })()}` +
     (NS.detail ? `<div class="chl">${N.ch.map((c, i) => `<div class="crow ${taught(c) ? "" : "dim"}"><span class="cl">${i + 1}. ${esc(c.n)}</span><select data-c="nsSel" data-i="${i}" ${taught(c) ? "" : "disabled"} aria-label="Chapter ${i + 1} status"><option value="1" ${NS.st[i] === 1 ? "selected" : ""}>Done</option><option value="2" ${NS.st[i] === 2 ? "selected" : ""}>Partial</option><option value="0" ${NS.st[i] === 0 ? "selected" : ""}>Pending</option></select><input class="cr" data-i="${i}" placeholder="Remark" value="${esc(NS.cr[i] || "")}" ${taught(c) ? "" : "disabled"}></div>`).join("")}</div><p><input id="nr" placeholder="Overall remark (optional)" value="${esc(NS.r)}" style="width:100%"></p>`
       : `<div class="chs">${N.ch.map((c, i) => `<button class="ch s${NS.st[i]}" data-a="nbCh" data-i="${i}" title="${esc(c.n)}" ${taught(c) ? "" : "disabled"}>Ch ${i + 1}<br>${taught(c) ? SYM[NS.st[i]] : "–"}</button>`).join("")}</div><p class="sub chnames">${N.ch.map((c, i) => `${i + 1}. ${esc(c.n)}`).join(" · ")}</p>`) +
-    `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div><p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div>${ne(NS.id) ? `<p></p><button class="btn alt sm" data-a="nsDel">Delete this entry</button>` : ""}<div class="err" id="e2"></div>`;
+    `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div>${NS.detail ? "" : `<p></p><button class="btn alt" data-a="nsRem" style="width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Remarks${NS.r ? ": " + esc(NS.r) : ""}</button>`}<p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div>${ne(NS.id) ? `<p></p><button class="btn alt sm" data-a="nsDel">Delete this entry</button>` : ""}<div class="err" id="e2"></div>`;
 }
 const nsKeep = () => { if (NS.detail) { document.querySelectorAll(".cr").forEach(i => { i.value.trim() ? NS.cr[i.dataset.i] = i.value.trim() : delete NS.cr[i.dataset.i]; }); const r = $("nr"); if (r) NS.r = r.value; } };
+/* quick remarks screen: tap buttons to build the remark, or open the keyboard */
+const QR_NUM = ["Ch", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], QR_TXT = ["Long q", "short q", "v short q", "app q", "diagram", "art work", "pages", "pending", "not done", "given again"];
+function nsRemDraw() {
+  const s = stuById(NS.id), b = (t, x = "") => `<button class="qb${x}" data-a="nrq" data-t="${esc(t)}">${esc(t)}</button>`;
+  $("sheet").innerHTML = `<div class="row between"><h2>Remarks · ${esc(s.name)}</h2></div><div class="qv" id="nrv" aria-live="polite">${esc(NS.r) || "<span class='sub'>Tap buttons to build the remark</span>"}</div>
+   <div class="qr6">${QR_NUM.map(t => b(t, t === "Ch" ? " ch" : "")).join("")}<button class="qb ic" data-a="nrBack" aria-label="Delete last">⌫</button></div>
+   <div class="qr3">${QR_TXT.map(t => b(t)).join("")}<button class="qb ic" data-a="nrKey" aria-label="Type with keyboard">⌨ Keyboard</button><button class="qb ic" data-a="nrClr">Clear</button></div>
+   <input id="nrk" class="hide" placeholder="Type remark" value="${esc(NS.r)}" style="width:100%;margin-top:8px" aria-label="Remark">
+   <p></p><div class="row"><button class="btn" data-a="nrDone" style="flex:2">Done</button></div>`;
+  $("nrk").oninput = () => { NS.r = $("nrk").value; dirty = true; nrShow(); };
+}
+const nrShow = () => { $("nrv").innerHTML = NS.r ? esc(NS.r) : "<span class='sub'>Tap buttons to build the remark</span>"; if ($("nrk") && document.activeElement !== $("nrk")) $("nrk").value = NS.r; };
+A.nrq = b => {
+  const t = b.dataset.t, r = NS.r || "";
+  if (QR_NUM.includes(t) && t !== "Ch" && /(\d|Ch )$/.test(r)) NS.r = r + t;        // digits continue a chapter number: Ch 1 2 → Ch 12
+  else NS.r = r ? r.replace(/,?\s*$/, "") + ", " + (t === "Ch" ? "Ch " : t) : (t === "Ch" ? "Ch " : t);
+  dirty = true; nrShow();
+};
+A.nrBack = () => { const r = NS.r || "", m = QR_TXT.find(t => r.endsWith(t)); NS.r = m ? r.slice(0, -m.length).replace(/,\s*$/, "") : r.replace(/,\s*$/, "").slice(0, -1); NS.r = NS.r.replace(/,\s*$/, ""); dirty = true; nrShow(); };
+A.nrClr = () => { NS.r = ""; dirty = true; nrShow(); };
+A.nrKey = () => { const k = $("nrk"); k.classList.remove("hide"); k.value = NS.r; k.focus(); };
+A.nrDone = () => { NS.r = (NS.r || "").replace(/[,\s]+$/, ""); NS.rem = false; nsDraw(); };
+A.nsRem = () => { nsKeep(); NS.rem = true; nsDraw(); };
 A.nsMode = () => { nsKeep(); NS.detail = !NS.detail; nsDraw(); };
 A.nbCh = b => { NS.st[+b.dataset.i] = nextS(NS.st[+b.dataset.i]); dirty = true; nsDraw(); };
 A.nsSel = b => { NS.st[+b.dataset.i] = +b.value; dirty = true; };
@@ -972,12 +997,15 @@ let CSU = null;
 function cSub(host) {
   const c = C.cls; if (!CSU || CSU.cls !== c) CSU = { cls: c, list: classSubList(c).slice(), mode: Object.assign({}, ((S.cfg.classSubjects || {})[c] || {}).mode) };
   host.innerHTML = `<div class="card"><h3>Subjects of class ${esc(c)}</h3><p class="sub">Add the subjects this class has and choose how each one is marked in <b>term exams</b>. Unit tests are always marked in marks.</p>
-   ${CSU.list.map(s => `<div class="li"><b>${esc(s)}</b><span class="row"><select data-c="csMode" data-s="${esc(s)}" aria-label="Exam marking for ${esc(s)}">${Object.entries(SUBMODE).map(([k, v]) => `<option value="${k}" ${(CSU.mode[s] || "marks") === k ? "selected" : ""}>${v}</option>`).join("")}</select><button class="link" data-a="csDel" data-s="${esc(s)}">Remove</button></span></div>`).join("") || `<p class="sub">No subjects yet.</p>`}
+   ${CSU.list.map(s => `<div class="li"><b>${esc(s)}</b><span class="row"><select data-c="csMode" data-s="${esc(s)}" aria-label="Exam marking for ${esc(s)}">${Object.entries(SUBMODE).map(([k, v]) => `<option value="${k}" ${(CSU.mode[s] || "marks") === k ? "selected" : ""}>${v}</option>`).join("")}</select><button class="link" data-a="csUp" data-s="${esc(s)}" aria-label="Move ${esc(s)} up">▲</button><button class="link" data-a="csDn" data-s="${esc(s)}" aria-label="Move ${esc(s)} down">▼</button><button class="link" data-a="csDel" data-s="${esc(s)}">Remove</button></span></div>`).join("") || `<p class="sub">No subjects yet.</p>`}
    <p></p><div class="row"><input id="csn" placeholder="New subject (e.g. Punjabi)" maxlength="12" autocapitalize="words" aria-label="New subject"><button class="btn alt" data-a="csAdd">Add subject</button></div>
    <p class="sub"><b>Grades in exams</b>: exams get a grade (marks optional) and only the grade is printed on mark sheets and report cards. <b>Theory + assessment</b>: exam marks are entered in two parts; only the total is printed. Names use letters and digits only (up to 12), e.g. SocialSci.</p>
    <button class="btn" data-a="csSave">Save subjects</button><div class="err" id="cserr"></div></div>`;
 }
 A.csMode = b => { if (CSU) CSU.mode[b.dataset.s] = b.value; };
+A.csUp = b => csMove(b.dataset.s, -1);
+A.csDn = b => csMove(b.dataset.s, 1);
+function csMove(sub, d) { const l = CSU.list, i = l.indexOf(sub), j = i + d; if (i < 0 || j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; cSub($("cbody")); }
 A.csDel = b => { if (!confirm("Remove " + b.dataset.s + " from this class? Marks and notebooks already saved are kept, just hidden.")) return; CSU.list = CSU.list.filter(x => x !== b.dataset.s); delete CSU.mode[b.dataset.s]; cSub($("cbody")); };
 A.csAdd = () => {
   const v = $("csn").value.trim(), er = x => ($("cserr").textContent = x);
@@ -1540,10 +1568,14 @@ A.sBulkGo = b => busy(b, async () => {
 async function adSettings(host) {
   const c = S.cfg;
   host.innerHTML = `<div class="card" id="shcard"><h3>Google Sheets backup</h3><p class="sub" id="shst">Checking…</p><div class="row"><button class="btn alt" data-a="shTest">Test connection</button><button class="btn" data-a="shSync">Sync all data now</button></div><div class="sub" id="shlog" role="status"></div></div>
-   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Default subjects (each class starts with these; the class incharge can change their own class under My class → Subjects)<input id="cu" value="${esc(c.subjects.join(", "))}"></label><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Exam grades, best to lowest (for grade-only subjects)<input id="cgr" value="${esc(gradeList().join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
+   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Default subjects (each class starts with these; the class incharge can change their own class under My class → Subjects)<input id="cu" value="${esc(c.subjects.join(", "))}"></label><div id="cuo" class="sorter">${subSortHTML(c.subjects)}</div><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Exam grades, best to lowest (for grade-only subjects)<input id="cgr" value="${esc(gradeList().join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
   shStatus();
   try { const l = (await api("GET", "/admin/audit")).log.slice(0, 12); $("aud").innerHTML = l.map(x => `<div class="li"><span>${esc(x.who)} ${esc(x.what)}</span><small>${new Date(x.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div>`).join("") || "Nothing yet."; } catch { $("aud").textContent = ""; }
 }
+const subSortHTML = l => l.length > 1 ? `<small class="sub">Order of subjects (the first is shown first):</small>${l.map((x, i) => `<div class="li"><b>${esc(x)}</b><span><button type="button" class="link" data-a="cuMv" data-i="${i}" data-d="-1" aria-label="Move ${esc(x)} up">▲</button><button type="button" class="link" data-a="cuMv" data-i="${i}" data-d="1" aria-label="Move ${esc(x)} down">▼</button></span></div>`).join("")}` : "";
+const cuList = () => $("cu").value.split(",").map(x => x.trim()).filter(Boolean);
+A.cuMv = b => { const l = cuList(), i = +b.dataset.i, j = i + +b.dataset.d; if (j < 0 || j >= l.length) return; [l[i], l[j]] = [l[j], l[i]]; $("cu").value = l.join(", "); $("cuo").innerHTML = subSortHTML(l); };
+addEventListener("input", e => { if (e.target.id === "cu" && $("cuo")) $("cuo").innerHTML = subSortHTML(cuList()); });
 A.cfgSave = b => busy(b, async () => {
   const l = id => $(id).value.split(",").map(x => x.trim()).filter(Boolean);
   const config = { school: $("cs").value.trim(), classes: l("cc"), subjects: l("cu"), monitorCategories: l("cm"), terms: l("ct"), grades: l("cgr"), signatories: l("cg"), nonEnglishFine: +$("cf").value, passPercent: +$("cp").value };
@@ -1972,14 +2004,18 @@ function drawPad() {
 }
 $("pad").innerHTML = [1, 2, 3, 4, 5, 6, 7, 8, 9, "⌫", 0, "Go"].map(k => `<button data-k="${k}" aria-label="${k === "⌫" ? "Delete" : k === "Go" ? "Sign in" : k}">${k === "⌫" ? ic("backspace", 24) : k === "Go" ? ic("arrow", 26) : k}</button>`).join("");
 drawPad();
+let logBusy = false;
+const logLock = on => { logBusy = on; const p = $("pad"); p.classList.toggle("lb", on); const g = p.querySelector("[data-k=Go]"); if (g) { g.disabled = on; g.classList.toggle("ld", on); } };
 async function doLogin(force) {
+  if (logBusy) return;
   const uname = (sel || $("user").value).trim().toLowerCase(); $("err").textContent = "";
   if (!uname) return $("err").textContent = "Enter your username.";
   if (pin.length < 4) return $("err").textContent = "PIN must be 4 to 6 digits.";
+  logLock(true);   // stays locked once signed in; unlocked only if the sign-in fails so the PIN can be retyped
   try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true, lh: localStorage.logoh || "" }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
-  catch (x) { if (x.code === "active_elsewhere") return takeoverAsk(x.other); $("err").textContent = x.message; pin = ""; drawPad(); }
+  catch (x) { logLock(false); if (x.code === "active_elsewhere") return takeoverAsk(x.other); $("err").textContent = x.message; pin = ""; drawPad(); }
 }
-$("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
+$("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b || logBusy) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
 
 A.lgForget = b => { localStorage.recent = JSON.stringify(rec().filter(x => x.u !== b.dataset.u)); if (sel === b.dataset.u) sel = ""; renderAcct(); };
 /* this profile is open on another device right now */
@@ -1998,7 +2034,7 @@ function loginWarm(u) {
   api("POST", "/login/warm", { username: u }).then(r => { if (r && r.wait > 0 && (sel || $("user").value.trim().toLowerCase()) === u) $("err").textContent = `This profile is locked for ${r.wait > 90 ? Math.ceil(r.wait / 60) + " minutes" : r.wait + " seconds"}.`; }).catch(() => { });
 }
 let warmT = 0; $("user").addEventListener("input", () => { clearTimeout(warmT); warmT = setTimeout(() => loginWarm($("user").value), 800); });
-addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
+addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (logBusy) return; if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
 
 /* ----- start / shell ----- */
 async function start(pre) {
