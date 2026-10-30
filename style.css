@@ -283,3 +283,12 @@ html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-th
 
 /* the white paper must cover the whole table when the preview is scrolled sideways */
 .scroll .msx{width:max-content;min-width:100%;box-sizing:border-box}
+
+/* login: pad locked while signing in */
+#pad.lb button{pointer-events:none;opacity:.6}#pad.lb button.ld{opacity:1}
+/* quick remarks screen: 6 + 3 columns so all buttons fit a phone; wider on tablets */
+.qv{min-height:48px;border:2px solid var(--line);border-radius:14px;padding:10px 12px;font-weight:700;font-size:17px;margin:8px 0;word-break:break-word}
+.qb{border-radius:12px;background:var(--lime);color:#0b3d3d;font-weight:800;font-size:15px;min-height:44px;padding:4px 6px;line-height:1.1}.qb.ch{background:var(--deep);color:#fff}.qb.ic{background:var(--card);border:2px solid var(--line);color:var(--ink)}
+.qr6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:6px}.qr3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+@media(min-width:700px){.qr3{grid-template-columns:repeat(4,1fr)}.qb{min-height:52px;font-size:17px}}
+.sorter{margin:4px 0 10px}.sorter .li{padding:4px 0}.sorter .link{font-size:18px;padding:4px 10px}
