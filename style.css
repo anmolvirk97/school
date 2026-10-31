@@ -292,3 +292,7 @@ html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-th
 .qr6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:6px}.qr3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 @media(min-width:700px){.qr3{grid-template-columns:repeat(4,1fr)}.qb{min-height:52px;font-size:17px}}
 .sorter{margin:4px 0 10px}.sorter .li{padding:4px 0}.sorter .link{font-size:18px;padding:4px 10px}
+
+/* stay-signed-in lock + resume banner */
+.kb{width:44px;height:44px;border-radius:50%;background:var(--card);color:var(--mut);border:2px solid var(--line);display:grid;place-items:center;flex:none;margin-right:8px}.kb.on{background:var(--deep);color:#fff;border-color:var(--deep)}
+.rsm{position:fixed;left:50%;transform:translateX(-50%);bottom:84px;z-index:60;width:min(94vw,520px);display:flex;gap:10px;align-items:center;background:var(--card);color:var(--ink);border:2px solid var(--green);border-radius:18px;padding:10px 12px;box-shadow:0 10px 30px #0004}.rsm>div{flex:1;min-width:0}.rsm small{display:block;color:var(--mut)}.rsm b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
