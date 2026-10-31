@@ -89,7 +89,7 @@ addEventListener("online", () => { syncBadge(); flushQueue(); }); addEventListen
 const SHA = {}, FT = {};
 const fresh = (ps, ttl) => ps.every(p => FT[p] && Date.now() - FT[p] < ttl);
 async function loadX(paths, force) {
-  const need = paths.filter(p => (force || !(p in D)) && !(typeof PQ !== "undefined" && PQ[p] && (PQ[p].busy || PQ[p].items.length))), changed = [];
+  const now0 = Date.now(), need = paths.filter(p => (force ? !(p in D && FT[p] && now0 - FT[p] < 15000) : !(p in D)) && !(typeof PQ !== "undefined" && PQ[p] && (PQ[p].busy || PQ[p].items.length))), changed = [];
   if (need.length) {
     try {
       const have = {}; need.forEach(p => { if (SHA[p] && p in D) have[p] = SHA[p]; });
@@ -113,10 +113,13 @@ function setAt(path, k, v) {
   const parent = ks.reduce((x, key) => (typeof x[key] === "object" && x[key] !== null) ? x[key] : (x[key] = {}), o);
   if (v == null) delete parent[last]; else parent[last] = v;
 }
+const LSQ = {};
+const lsSave = p => { clearTimeout(LSQ[p]); LSQ[p] = setTimeout(() => { delete LSQ[p]; if (!token) return; try { localStorage["c_" + p] = JSON.stringify(D[p]); } catch { } }, 400); };
+addEventListener("pagehide", () => { if (!token) return; Object.keys(LSQ).forEach(p => { clearTimeout(LSQ[p]); delete LSQ[p]; try { localStorage["c_" + p] = JSON.stringify(D[p]); } catch { } }); });
 async function patch(path, ops) {                       // ops: [{k:"marks.t1.s3", v:{...}}]  (v: null deletes)
   const old = ops.map(op => getAt(D[path] || {}, op.k.split(".")));
   ops.forEach(op => setAt(path, op.k, op.v));
-  try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
+  lsSave(path);
   try { await api("POST", "/patch", { path, ops }); }
   catch (e) {
     if (e.offline) { Q.set([...Q.get(), { path, ops }]); toast("Saved on this phone. It will sync when you're back online."); return; }
@@ -129,7 +132,7 @@ const PQ = {}, pend = () => Object.values(PQ).reduce((n, q) => n + q.items.lengt
 function patchQ(path, ops, onFail) {
   const old = ops.map(op => getAt(D[path] || {}, op.k.split(".")));
   ops.forEach(op => setAt(path, op.k, op.v));
-  try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
+  lsSave(path);
   (PQ[path] = PQ[path] || { items: [], busy: false }).items.push({ ops, old, onFail }); syncBadge(); pqRun(path);
 }
 async function pqRun(path) {
@@ -143,7 +146,7 @@ async function pqRun(path) {
       catch (e) {
         if (e.offline) { batch.forEach(b => Q.set([...Q.get(), { path, ops: b.ops }])); toast("Saved on this phone. It will sync when you're back online."); continue; }
         if (batch.length > 1) { batch.forEach(b => b.solo = true); q.items.unshift(...batch); continue; }      // find out which entry was refused
-        const b = batch[0]; b.ops.forEach((op, i) => setAt(path, op.k, b.old[i] === undefined ? null : b.old[i])); try { localStorage["c_" + path] = JSON.stringify(D[path]); } catch { }
+        const b = batch[0]; b.ops.forEach((op, i) => setAt(path, op.k, b.old[i] === undefined ? null : b.old[i])); lsSave(path);
         b.onFail ? b.onFail(e) : (toast("Not saved: " + e.message, true), redrawNow());
       }
     }
@@ -352,6 +355,7 @@ async function mRun(host, c, s, tid, quiet, local) {
   const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
+  rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}`,
     tools: `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
     done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? esc(mTxt(e)) : ""; }, pick: mOpen });
@@ -505,6 +509,7 @@ function nDates() {
 }
 A.nDate = b => { N.date = b.dataset.d; if ($("ndate")) $("ndate").value = N.date; nbDraw(); };
 function nbDraw() {
+  nbMark();
   $("nbody").innerHTML = `<div class="seg" role="tablist"><button class="${N.view === "entry" ? "on" : ""}" data-a="nView" data-v="entry">Enter</button><button class="${N.view === "heat" ? "on" : ""}" data-a="nView" data-v="heat">Heatmap</button></div><div id="nmain"></div>`;
   if (N.view === "heat") return nbHeat();
   entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)} · ${N.ch.filter(taught).length} chapters being checked${nDates()}`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id), t = N.ch.filter(taught).length; if (e) return nbDone(e, N.ch) + "/" + t; const p = nPrev(s.id); return p ? `<span class="prev">last ${esc(fmtD(p.d))} · ${nbDone(p.e, N.ch)}/${t}</span>` : ""; }, tools: `<button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
@@ -549,7 +554,7 @@ A.chSave = b => busy(b, async () => {
 });
 function nOpenStu(id) {
   const e = ne(id); NS = { id, st: N.ch.map((c, i) => e ? (e.s[i] || 0) : 0), cr: Object.assign({}, e && e.cr), r: e ? e.r || "" : "", detail: NS.detail || false, rem: false };
-  sheet(""); nsDraw();
+  sheet(""); nbMark(id); nsDraw();
 }
 function nsDraw() {
   if (NS.rem) return nsRemDraw();
@@ -1940,9 +1945,13 @@ A.thNight = b => { TH.night = b.dataset.k; if (TH.mode === "day") TH.mode = "sys
 A.thTime = () => { TH.from = $("thf").value || TH.from; TH.to = $("tht").value || TH.to; themeSave(); };
 
 /* ===== session guard: activity tracking, 1-minute idle sign-out (10 s warning), wipe of local data on every sign-out ===== */
-const IDLE_MS = 60000, WARN_S = 10, KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt"];
+const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume"];
+const idleMin = () => { const v = +localStorage.idlem; return IDLE_OPTS.includes(v) ? v : 1; };            // minutes of inactivity before auto sign-out (this device)
+let KEEP = false; try { KEEP = sessionStorage.keep === "1"; } catch { }                                    // "stay signed in" lock for this session
+const srvIdle = () => KEEP ? 43200 : idleMin() * 60 + 30, idleTxt = () => idleMin() === 1 ? "a minute" : idleMin() + " minutes";
+const applyIdle = () => { if (token) api("POST", "/session/idle", { sec: srvIdle() }).catch(() => { }); };
 let lastAct = Date.now(), lastPing = 0, BG = 0, BUSYN = 0, outBusy = false, printing = false;
-const wipeLocal = () => { try { Object.keys(localStorage).forEach(k => { if (!KEEP_KEYS.includes(k) && !k.startsWith("theme_")) localStorage.removeItem(k); }); sessionStorage.removeItem("tok"); } catch { } };
+const wipeLocal = () => { try { Object.keys(localStorage).forEach(k => { if (!KEEP_KEYS.includes(k) && !k.startsWith("theme_")) localStorage.removeItem(k); }); sessionStorage.removeItem("tok"); sessionStorage.removeItem("keep"); } catch { } };
 function endSession(msg) { token = ""; wipeLocal(); try { if (msg) sessionStorage.msg = msg; } catch { } location.reload(); }
 function deviceLabel() {
   const ua = navigator.userAgent, b = /Edg\//.test(ua) ? "Edge" : /SamsungBrowser/.test(ua) ? "Samsung Internet" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "Browser";
@@ -1959,19 +1968,30 @@ const showIdle = n => { $("idlen").textContent = n; $("idle").classList.remove("
 function idleCheck() {
   if (!token || !S.me || outBusy) return;
   if (pend() > 0 || BUSYN > 0 || printing) lastAct = Date.now();                       // saving / importing / printing counts as activity
-  const idle = Date.now() - lastAct;
-  if (idle >= IDLE_MS) return signOut("idle");
-  if (idle >= IDLE_MS - WARN_S * 1000) showIdle(Math.max(1, Math.ceil((IDLE_MS - idle) / 1000))); else hideIdle();
+  if (KEEP) { hideIdle(); if (Date.now() - lastPing > 25000) { lastPing = Date.now(); api("POST", "/session/ping", {}).catch(() => { }); } return; }   // locked: never signs out, keeps telling the server it is in use
+  const lim = idleMin() * 60000, warn = lim <= 60000 ? 10 : 20, idle = Date.now() - lastAct;
+  if (idle >= lim) return signOut("idle");
+  if (idle >= lim - warn * 1000) showIdle(Math.max(1, Math.ceil((lim - idle) / 1000))); else hideIdle();
 }
 setInterval(idleCheck, 1000); document.addEventListener("visibilitychange", idleCheck);
 async function signOut(why) {
   if (outBusy) return; outBusy = true; hideIdle();
   for (let i = 0; i < 20 && pend() > 0; i++) await new Promise(r => setTimeout(r, 200));            // let unsaved entries reach the server first
   try { await Promise.race([api("POST", "/logout", { reason: why }), new Promise(r => setTimeout(r, 3000))]); } catch { }
-  endSession(why === "idle" ? "Signed out after a minute of inactivity." : "");
+  endSession(why === "idle" ? "Signed out after " + idleTxt() + " of inactivity." : "");
 }
 A.stay = () => { lastAct = Date.now(); hideIdle(); };
 A.logout = () => signOut("manual");
+A.idleSet = b => { try { localStorage.idlem = b.value; } catch { } lastAct = Date.now(); applyIdle(); toast("You will be signed out after " + idleTxt() + " of inactivity"); };
+function paintKeep() {
+  let k = $("kb"); if (!k) { k = document.createElement("button"); k.id = "kb"; k.className = "kb"; k.dataset.a = "keepTog"; $("avb").insertAdjacentElement("beforebegin", k); }
+  k.classList.toggle("on", KEEP); k.setAttribute("aria-pressed", KEEP); k.title = k.ariaLabel = KEEP ? "Staying signed in. Tap to turn off" : "Tap to stay signed in while inactive"; k.innerHTML = ic("lock", 20);
+}
+A.keepTog = () => {
+  KEEP = !KEEP; try { sessionStorage.keep = KEEP ? "1" : "0"; } catch { } lastAct = Date.now(); lastPing = 0; hideIdle(); paintKeep(); applyIdle();
+  toast(KEEP ? "Locked: you stay signed in until you turn this off or log out" : "Auto sign-out is on again (" + idleTxt() + ")");
+  const sh = $("sheet"); if (sh && !sh.classList.contains("hide") && sh.querySelector(".pf")) A.profile();
+};
 /* where has this profile been signed in? */
 A.sessInfo = async () => {
   sheetL(`<h2>Recent logins</h2><p class="sub">Loading…</p>`); let r; try { r = await api("GET", "/session/info"); } catch (x) { return toast(x.message, true); }
@@ -2012,7 +2032,7 @@ async function doLogin(force) {
   if (!uname) return $("err").textContent = "Enter your username.";
   if (pin.length < 4) return $("err").textContent = "PIN must be 4 to 6 digits.";
   logLock(true);   // stays locked once signed in; unlocked only if the sign-in fails so the PIN can be retyped
-  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), force: force === true, lh: localStorage.logoh || "" }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
+  try { const r = await api("POST", "/login", { username: uname, pin, device: deviceId(), label: deviceLabel(), idle: srvIdle(), force: force === true, lh: localStorage.logoh || "" }); token = r.token; localStorage.tok = token; remember(uname, r.user.name, loginSub(r.user)); S.me = r.user; await start(r); }
   catch (x) { logLock(false); if (x.code === "active_elsewhere") return takeoverAsk(x.other); $("err").textContent = x.message; pin = ""; drawPad(); }
 }
 $("pad").onclick = e => { const b = e.target.closest("[data-k]"); if (!b || logBusy) return; const k = b.dataset.k; if (k === "⌫") pin = pin.slice(0, -1); else if (k === "Go") return doLogin(); else if (pin.length < 6) pin += k; drawPad(); };
@@ -2036,12 +2056,40 @@ function loginWarm(u) {
 let warmT = 0; $("user").addEventListener("input", () => { clearTimeout(warmT); warmT = setTimeout(() => loginWarm($("user").value), 800); });
 addEventListener("keydown", e => { if (!$("login").classList.contains("hide") && !e.target.matches("#user")) { if (logBusy) return; if (/^\d$/.test(e.key) && pin.length < 6) { pin += e.key; drawPad(); } else if (e.key === "Backspace") { pin = pin.slice(0, -1); drawPad(); } else if (e.key === "Enter") doLogin(); } else if (e.key === "Enter" && e.target.matches("#user")) $("pad").querySelector("[data-k=Go]").focus(); });
 
+/* ----- "pick up where you left off": remembers (not the data, only the place) the last notebook / marks entry across a sign-out ----- */
+let RSM = null;
+const rmark = o => { try { if (S.me) localStorage.resume = JSON.stringify(Object.assign({ u: S.me.username, at: Date.now() }, o)); } catch { } };
+const nbMark = st => rmark({ v: "nb", c: N.cls, s: N.sub, d: N.date, st: st || "", t: "Notebook · " + N.cls + " " + N.sub + " · " + fmtD(N.date) });
+function showResume() {
+  let r; try { r = JSON.parse(localStorage.resume || "null"); } catch { r = null; }
+  if (!r || r.u !== S.me.username || Date.now() - r.at > 8 * 3600e3) { try { localStorage.removeItem("resume"); } catch { } return; }
+  RSM = r; let b = $("rsm"); if (!b) { b = document.createElement("div"); b.id = "rsm"; b.className = "rsm"; document.body.appendChild(b); }
+  b.innerHTML = `<div><small>Pick up where you left off</small><b>${esc(r.t)}</b></div><button class="btn sm" data-a="rsmGo">Resume</button><button class="link" data-a="rsmNo" aria-label="Dismiss">✕</button>`; b.classList.remove("hide");
+}
+A.rsmNo = () => { try { localStorage.removeItem("resume"); } catch { } $("rsm").classList.add("hide"); };
+A.rsmGo = b => busy(b, async () => {
+  const r = RSM; $("rsm").classList.add("hide"); if (!r) return;
+  try {
+    if (!myClasses().includes(r.c) || !subjectsOf(r.c).includes(r.s)) return toast("That class or subject is no longer available to you.", true);
+    if (r.v === "nb") {
+      await go("nb"); $("nc").value = r.c; fillPair("n"); $("ns").value = r.s; $("ndate").value = r.d;
+      if (await nbLoad() && N.ch.length) { nbDraw(); if (r.st && stuById(r.st)) nOpenStu(r.st); }
+    } else if (r.v === "term") {
+      TM.tab = "enter"; TM.term = r.term || TM.term; TM.c = r.c; TM.s = r.s; await go("term"); await tInfo();
+      await mRun($("mentry"), r.c, r.s, r.tid, false, false);
+    } else {
+      await go("marks"); $("mc").value = r.c; fillPair("m"); $("ms").value = r.s; await mHist();
+      await mRun($("mentry"), r.c, r.s, r.tid, false, false);
+    }
+  } catch (x) { toast("Could not resume: " + x.message, true); }
+});
+
 /* ----- start / shell ----- */
 async function start(pre) {
   if (pre && pre.config && pre.students) { S.cfg = pre.config; S.students = pre.students; } else [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);   // a fresh sign-in already brings both
 
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("avb").textContent = S.me.name[0].toUpperCase();
-  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); loadAssets(pre); buildNav(); renderSide(); go("home"); flushQueue(); syncBadge();
+  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); loadAssets(pre); buildNav(); renderSide(); paintKeep(); go("home"); showResume(); flushQueue(); syncBadge(); if (KEEP) applyIdle();
   setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 3000);   // warm up the incharge screens
 }
 function buildNav() {
@@ -2054,7 +2102,7 @@ function buildNav() {
 A.nav = b => b.dataset.v === "out" ? A.logout() : go(b.dataset.v);
 
 async function go(v) {
-  if (!closeSheet()) return; cur = v; VT++; buildNav(); $("view").innerHTML = SK; $("gres").innerHTML = "";
+  if (!closeSheet()) return; const rb = $("rsm"); if (rb) rb.classList.add("hide"); cur = v; VT++; buildNav(); $("view").innerHTML = SK; $("gres").innerHTML = "";
   try { await V[v]($("view")); } catch (e) { $("view").innerHTML = `<div class="card empty"><b>Could not load this page</b><p class="sub">${esc(e.message)}</p></div>`; }
   scrollTo(0, 0);
 }
@@ -2071,6 +2119,7 @@ A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.data
 /* ----- profile: avatar, name, username + role, theme, signature screen, PIN ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
   <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Theme &amp; night mode</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent logins</b>${ic("chevr", 18)}</button></div>
+  <h3 style="margin-top:18px">Auto sign-out</h3><div class="form"><label>Sign out after being inactive for<select data-c="idleSet" ${KEEP ? "disabled" : ""}>${IDLE_OPTS.map(m => `<option value="${m}" ${idleMin() === m ? "selected" : ""}>${m === 1 ? "1 minute" : m + " minutes"}</option>`).join("")}</select></label><button type="button" class="prow2" data-a="keepTog"><span>${ic("lock", 18)}</span><b>${KEEP ? "Stay signed in is ON · tap to turn off" : "Keep me signed in (lock)"}</b></button></div>
   <h3 style="margin-top:18px">Change PIN</h3><div class="form"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN" autocomplete="current-password"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN" autocomplete="new-password"><input id="np2" type="password" inputmode="numeric" maxlength="6" placeholder="Repeat new PIN" aria-label="Repeat new PIN" autocomplete="new-password"></div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
 A.sigScreen = () => sheetL(`<h2>My signature</h2><p class="sub">Printed on mark sheets and report cards wherever “Class teacher” is ticked.</p><div class="sgprev sgsig">${S.sig ? `<img src="${S.sig}" alt="Signature">` : `<small>No signature saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="sigDraw">Draw</button><button class="btn alt sm" data-a="sigUp">Upload image</button>${S.sig ? `<button class="btn alt sm" data-a="sigDel">Remove</button>` : ""}</div><p></p><button class="btn alt" data-a="profile">Back to profile</button>`);
