@@ -436,3 +436,11 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 @keyframes qcur{50%{opacity:0}}@media(prefers-reduced-motion:reduce){.qg.on::after{animation:none}}
 .qb.sm12{font-size:12px}
 .payr{align-items:center;margin-bottom:6px}.payr .btn{flex:0 0 auto}
+/* marks entry: obtained / total side by side, and theory | assessment | total in one row */
+.mrow{display:flex;flex-wrap:nowrap;align-items:center;gap:8px;margin:8px 0}
+.sheet .mrow>input.big{flex:1 1 0;width:auto;min-width:0;font-size:clamp(24px,8vw,34px);padding-left:4px;padding-right:4px}
+.mrow>b{flex:none}
+.m3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
+.mc{display:grid;gap:4px;min-width:0;text-align:center;font-weight:700;font-size:13px}
+.sheet .mc>input.big{width:100%;min-width:0;font-size:clamp(22px,7vw,30px);padding-left:4px;padding-right:4px;text-align:center}
+.mc>small{opacity:.7;font-weight:700}.mc>input[readonly]{opacity:.75}
