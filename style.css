@@ -444,3 +444,11 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 .mc{display:grid;gap:4px;min-width:0;text-align:center;font-weight:700;font-size:13px}
 .sheet .mc>input.big{width:100%;min-width:0;font-size:clamp(22px,7vw,30px);padding-left:4px;padding-right:4px;text-align:center}
 .mc>small{opacity:.7;font-weight:700}.mc>input[readonly]{opacity:.75}
+
+/* syllabus: chapters with contents, and the archive */
+.crow.chc{flex-direction:column;align-items:stretch;gap:8px;padding:12px;border:1px solid var(--line);border-radius:18px}
+.chtop,.chmid{display:flex;gap:8px;align-items:center}.chtop .cn{flex:1;min-width:0}.chc .chmid select{flex:1 1 0;min-width:0}.chc select.cq{flex:none;width:100%}.chc textarea.cc{min-height:64px}
+.cchips{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}.cct{background:var(--lime);color:#0b3d3d;border-radius:999px;padding:3px 11px;font-size:12px;font-weight:800}
+.syl{margin-top:10px;border:1px solid var(--line);border-radius:16px;padding:6px 12px}.syl summary{cursor:pointer;min-height:40px;display:flex;gap:8px;align-items:center}
+.sylr{padding:8px 0;border-top:1px solid var(--line)}.sylr.dim{opacity:.55}.sylr.hi{background:var(--lime);color:#0b3d3d;border-radius:12px;padding:8px 10px;border-top-color:transparent}.sylr.hi .cct{background:#ffffffb3}
+#tcc .cchips{margin:2px 0 8px}
