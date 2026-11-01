@@ -652,27 +652,58 @@ function nsDraw() {
 }
 const nsKeep = () => { if (NS.detail) { document.querySelectorAll(".cr").forEach(i => { i.value.trim() ? NS.cr[i.dataset.i] = i.value.trim() : delete NS.cr[i.dataset.i]; }); const r = $("nr"); if (r) NS.r = r.value; } };
 /* quick remarks screen: tap buttons to build the remark, or open the keyboard */
-const QR_NUM = ["Ch", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], QR_TXT = ["Long q", "short q", "v short q", "app q", "diagram", "art work", "pages", "pending", "not done", "given again"];
+const QR_NUM = ["Ch", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], QR_TXT = ["v sh", "sh", "lo", "app", "Q", "diagram", "art work", "pages", "pending", "not done", "given again"];
+/* The remark is a list of pieces (NS.rt) with a cursor (NS.rc) between pieces and an optional selected piece (NS.rs).
+   The saved remark stays plain text in NS.r, so old entries and the keyboard box keep working. */
+const qrKind = t => t === "Ch" ? "c" : t === " " ? "s" : /^\d$/.test(t) ? "d" : "t";
+function qrJoin(a) {
+  let o = "";
+  a.forEach((t, i) => {
+    const k = qrKind(t), p = i ? qrKind(a[i - 1]) : "";
+    if (i && k === "d") { if (p === "c") o += " "; else if (p === "t") o += ", "; }          // Ch 1 · digits after text start a new phrase
+    else if (i && (k === "c" || k === "t") && p !== "s") o += ", ";                          // phrases are comma separated unless you typed a space
+    o += t;
+  });
+  return o;
+}
+function qrParse(str) {
+  const out = [];
+  String(str || "").split(/,\s*/).forEach(seg => {
+    if (!seg) return; const m = /^Ch ?([\d ]*)$/.exec(seg);
+    if (m) { out.push("Ch"); for (const ch of m[1]) out.push(ch); } else out.push(seg);
+  });
+  return out;
+}
 function nsRemDraw() {
   const s = stuById(NS.id), b = (t, x = "") => `<button class="qb${x}" data-a="nrq" data-t="${esc(t)}">${esc(t)}</button>`;
-  $("sheet").innerHTML = `<div class="row between"><h2>Remarks · ${esc(s.name)}</h2></div><div class="qv" id="nrv" aria-live="polite">${esc(NS.r) || "<span class='sub'>Tap buttons to build the remark</span>"}</div>
-   <div class="qr6">${QR_NUM.map(t => b(t, t === "Ch" ? " ch" : "")).join("")}<button class="qb ic" data-a="nrBack" aria-label="Delete last">⌫</button></div>
+  if (NS.rt == null || NS.rj !== NS.r) { NS.rt = qrParse(NS.r); NS.rc = NS.rt.length; NS.rs = -1; NS.rj = NS.r; }
+  $("sheet").innerHTML = `<div class="row between"><h2>Remarks · ${esc(s.name)}</h2></div><div class="qv" id="nrv" aria-live="polite"></div><p class="sub" id="nrp"></p>
+   <div class="qr6">${QR_NUM.map(t => b(t, t === "Ch" ? " ch" : "")).join("")}<button class="qb ic" data-a="nrBack" aria-label="Delete">⌫</button><button class="qb ic sm12" data-a="nrSp" aria-label="Space">Space</button><button class="qb ic sm12" data-a="nrEnd" aria-label="Move cursor to the end">End ⇥</button></div>
    <div class="qr3">${QR_TXT.map(t => b(t)).join("")}<button class="qb ic" data-a="nrKey" aria-label="Type with keyboard">⌨ Keyboard</button><button class="qb ic" data-a="nrClr">Clear</button></div>
+   <p class="sub">Tap a remark to select it: ⌫ deletes it, any button replaces it. Tap between remarks to put the cursor there.</p>
    <input id="nrk" class="hide" placeholder="Type remark" value="${esc(NS.r)}" style="width:100%;margin-top:8px" aria-label="Remark">
    <p></p><div class="row"><button class="btn" data-a="nrDone" style="flex:2">Done</button></div>`;
-  $("nrk").oninput = () => { NS.r = $("nrk").value; dirty = true; nrShow(); };
+  $("nrk").oninput = () => { NS.r = $("nrk").value; NS.rt = qrParse(NS.r); NS.rc = NS.rt.length; NS.rs = -1; NS.rj = NS.r; dirty = true; nrShow(); };
+  nrShow();
 }
-const nrShow = () => { $("nrv").innerHTML = NS.r ? esc(NS.r) : "<span class='sub'>Tap buttons to build the remark</span>"; if ($("nrk") && document.activeElement !== $("nrk")) $("nrk").value = NS.r; };
-A.nrq = b => {
-  const t = b.dataset.t, r = NS.r || "";
-  if (QR_NUM.includes(t) && t !== "Ch" && /(\d|Ch )$/.test(r)) NS.r = r + t;        // digits continue a chapter number: Ch 1 2 → Ch 12
-  else NS.r = r ? r.replace(/,?\s*$/, "") + ", " + (t === "Ch" ? "Ch " : t) : (t === "Ch" ? "Ch " : t);
-  dirty = true; nrShow();
-};
-A.nrBack = () => { const r = NS.r || "", m = QR_TXT.find(t => r.endsWith(t)); NS.r = m ? r.slice(0, -m.length).replace(/,\s*$/, "") : r.replace(/,\s*$/, "").slice(0, -1); NS.r = NS.r.replace(/,\s*$/, ""); dirty = true; nrShow(); };
-A.nrClr = () => { NS.r = ""; dirty = true; nrShow(); };
+function nrShow() {
+  const t = NS.rt, n = t.length, gap = i => `<button class="qg${NS.rc === i && NS.rs < 0 ? " on" : ""}" data-a="nrGap" data-i="${i}" aria-label="Put the cursor here"></button>`; let h = "";
+  for (let i = 0; i < n; i++) { const k = qrKind(t[i]); h += gap(i) + `<button class="qt${k === "c" ? " c" : k === "s" ? " s" : ""}${NS.rs === i ? " sel" : ""}" data-a="nrSel" data-i="${i}" aria-pressed="${NS.rs === i}">${t[i] === " " ? "␣" : esc(t[i])}</button>`; }
+  $("nrv").innerHTML = n ? h + gap(n) : gap(0) + "<span class='sub'>Tap buttons to build the remark</span>";
+  $("nrp").textContent = n ? "Saved as: " + qrJoin(t) : "";
+  if ($("nrk") && document.activeElement !== $("nrk")) $("nrk").value = NS.r;
+}
+const nrSync = () => { NS.r = qrJoin(NS.rt); NS.rj = NS.r; dirty = true; nrShow(); };
+function nrIns(t) { if (NS.rs >= 0) { NS.rt[NS.rs] = t; NS.rc = NS.rs + 1; NS.rs = -1; } else { NS.rt.splice(NS.rc, 0, t); NS.rc++; } nrSync(); }   // selected piece is replaced, otherwise insert at the cursor
+A.nrq = b => nrIns(b.dataset.t);
+A.nrSp = () => nrIns(" ");
+A.nrBack = () => { if (NS.rs >= 0) { NS.rt.splice(NS.rs, 1); NS.rc = NS.rs; NS.rs = -1; } else if (NS.rc > 0) { NS.rt.splice(NS.rc - 1, 1); NS.rc--; } else return; nrSync(); };
+A.nrEnd = () => { NS.rc = NS.rt.length; NS.rs = -1; nrShow(); };
+A.nrGap = b => { NS.rc = +b.dataset.i; NS.rs = -1; nrShow(); };
+A.nrSel = b => { const i = +b.dataset.i; if (NS.rs === i) { NS.rs = -1; NS.rc = i + 1; } else { NS.rs = i; NS.rc = i + 1; } nrShow(); };
+A.nrClr = () => { NS.rt = []; NS.rc = 0; NS.rs = -1; nrSync(); };
 A.nrKey = () => { const k = $("nrk"); k.classList.remove("hide"); k.value = NS.r; k.focus(); };
-A.nrDone = () => { NS.r = (NS.r || "").replace(/[,\s]+$/, ""); NS.rem = false; nsDraw(); };
+A.nrDone = () => { NS.r = (NS.r || "").replace(/[,\s]+$/, ""); NS.rt = null; NS.rs = -1; NS.rem = false; nsDraw(); };
 A.nsRem = () => { nsKeep(); NS.rem = true; nsDraw(); };
 A.nsMode = () => { nsKeep(); NS.detail = !NS.detail; nsDraw(); };
 A.nbCh = b => { NS.st[+b.dataset.i] = nextS(NS.st[+b.dataset.i]); dirty = true; nsDraw(); };
@@ -1314,45 +1345,71 @@ function fyCalc(cls, y, sid) {
 const fyDef = (cls, y, sid) => { const c = fyCalc(cls, y, sid); return !!c.r && c.owedM > 0; };
 function feeSummary(cls, sid) {
   const y = ayStart(), c = fyCalc(cls, y, sid); if (!c.r) return `<p class="sub">No fee record for ${fyLab(y)}.</p>`;
-  return `<div class="li"><span>${esc(fyText(cls, y, sid))}</span><b>${c.owedM > 0 ? pill(fyM(c.owedM) + " due", "bad") : "Up to date ✓"}</b></div>${c.bal != null ? `<div class="li"><span>Yearly due amount</span><b>${rupee(c.bal)}</b></div>` : ""}`;
+  return `<div class="li"><span>${esc(fyText(cls, y, sid))}</span><b>${c.owedM > 0 ? pill(fyM(c.owedM) + " due", "bad") : "Up to date ✓"}</b></div>${fyPayLine(c.r)}${c.bal != null ? `<div class="li"><span>Yearly due amount</span><b>${rupee(c.bal)}</b></div>` : ""}`;
 }
 function cFee(host) {
   C.fy = C.fy || ayStart(); const y = C.fy, all = classStudents(C.cls), cs = all.map(s => fyCalc(C.cls, y, s.id));
   const def = cs.filter(c => c.r && c.owedM > 0).length, paidAmt = cs.reduce((n, c) => n + ((c.r && c.r.paid) || 0), 0), dueAmt = cs.reduce((n, c) => n + (c.bal || 0), 0), recd = cs.filter(c => c.r).length;
   host.innerHTML = `<div class="row"><select id="fyr" data-c="fYear" aria-label="Academic year" style="max-width:200px">${[ayStart() + 1, ayStart(), ayStart() - 1, ayStart() - 2].map(v => `<option value="${v}" ${v === y ? "selected" : ""}>Year ${fyLab(v)}</option>`).join("")}</select></div>
    <div class="kpis"><div class="kpi"><small>With a fee record</small><b>${recd}/${all.length}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Behind on months</small><b>${def}</b></div><div class="kpi"><small>Paid (amounts entered)</small><b>${rupee(paidAmt)}</b></div><div class="kpi"><small>Due (amounts entered)</small><b>${rupee(dueAmt)}</b></div></div><div id="fee"></div>`;
-  entry($("fee"), { id: "e", cls: C.cls, note: "Tap a student to mark the months paid (full or half), a quarter, or “paid until” a month. The yearly amount is optional.", done: s => { const c = fyCalc(C.cls, y, s.id); return !!c.r && c.owedM === 0; }, tail: s => { const c = fyCalc(C.cls, y, s.id); return !c.r ? "" : `${esc(fyText(C.cls, y, s.id))}${c.owedM > 0 ? ` <span class="pill bad">${fyM(c.owedM)} due</span>` : ""}`; }, pick: feeOpen });
+  entry($("fee"), { id: "e", cls: C.cls, note: "Tap a student. Tap a month to mark every month up to it as paid; tap the last paid month again for half. Payment dates and amounts are optional.", done: s => { const c = fyCalc(C.cls, y, s.id); return !!c.r && c.owedM === 0; }, tail: s => { const c = fyCalc(C.cls, y, s.id); return !c.r ? "" : `${esc(fyText(C.cls, y, s.id))}${c.owedM > 0 ? ` <span class="pill bad">${fyM(c.owedM)} due</span>` : ""}`; }, pick: feeOpen });
 }
 A.fYear = b => { C.fy = +b.value; cFee($("cbody")); };
+const fyPayLine = r => { const p = (r && r.pays) || []; return p.length ? `<div class="li"><span>Payments</span><b>${p.slice(-3).map(x => (x.d ? fmtD(x.d) + " · " : "") + rupee(x.a)).join(" , ")}${p.length > 3 ? " …" : ""}</b></div>` : ""; };
 let FY = {};
 function feeOpen(id) {
-  const y = C.fy, r = fyRec(C.cls, y, id) || {}; FY = { sid: id, y, ms: Object.assign({}, r.months) };
+  const y = C.fy, r = fyRec(C.cls, y, id) || {};
+  FY = { sid: id, y, ms: Object.assign({}, r.months), pays: (r.pays || []).map(p => ({ d: p.d || "", a: p.a })) };
+  if (!FY.pays.length && r.paid > 0) FY.pays.push({ d: "", a: r.paid });          // older record: only a total was saved
   sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">Fees ${fyLab(y)} · <span id="fytxt"></span></p><div id="fygrid" class="mgrid"></div>
+   <p class="sub">Tap a month: all months up to it turn green. Tap the last green month again for half paid, once more to unmark it.</p>
    <div class="row chips">${[0, 1, 2, 3].map(q => `<button class="chip" data-a="fyQ" data-q="${q}">Quarter ${q + 1} <small>${MN[q * 3]}–${MN[q * 3 + 2]}</small></button>`).join("")}</div>
-   <div class="row mid"><label class="fl">Paid until<select id="fyu"><option value="">Choose month</option>${MN.map((n, i) => `<option value="${i}">${n}</option>`).join("")}</select></label><label class="cb"><input type="checkbox" id="fyh"> only half of that month</label><button class="btn alt sm" data-a="fyUpto">Apply</button></div>
-   <h4>Amounts (optional)</h4><div class="row"><input id="fyt" type="number" inputmode="decimal" placeholder="Total fee for the year ₹" value="${r.total || ""}" aria-label="Total fee for the year"><input id="fyp" type="number" inputmode="decimal" placeholder="Paid so far ₹" value="${r.paid ?? ""}" aria-label="Paid so far"></div>
+   <h4>Amounts (optional)</h4><div class="row"><input id="fyt" type="number" inputmode="decimal" placeholder="Total fee for the year ₹" value="${r.total || ""}" aria-label="Total fee for the year"></div>
+   <h4>Payments (optional)</h4><div id="fypl"></div><button class="btn alt sm" data-a="fyPayAdd">+ Add payment</button>
    <p class="sub" id="fydue"></p><button class="btn alt sm" data-a="fyAmt">Mark months from the paid amount</button>
    <p></p><div class="row"><button class="btn" data-a="fySave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="fyClear">Clear</button></div><div class="err" id="e2"></div>`);
-  fyGrid(); $("fyt").oninput = $("fyp").oninput = fyDue; fyDue();
+  fyGrid(); fyPays(); $("fyt").oninput = fyDue;
 }
 function fyGrid() {
   $("fygrid").innerHTML = fyMonths(FY.y).map(m => { const v = FY.ms[m.k] || 0; return `<button class="mb m${v}" data-a="fyM" data-k="${m.k}"><small>${m.k.slice(0, 4)}</small><br>${m.n}<br>${["–", "½", "✔"][v]}</button>`; }).join("");
   $("fytxt").textContent = fyTxt(FY.ms, FY.y);
 }
-function fyDue() {
-  const t = +$("fyt").value, p = +$("fyp").value || 0;
-  $("fydue").innerHTML = t > 0 ? `Due <b>${rupee(Math.max(0, t - p))}</b> of ${rupee(t)} · one month = ${rupee(t / 12)}` : "Enter the yearly total to see the due amount and to mark months from an amount.";
+const fyPaySum = () => Math.round(FY.pays.reduce((n, p) => n + (+p.a > 0 ? +p.a : 0), 0) * 100) / 100;
+function fyPays() {
+  $("fypl").innerHTML = FY.pays.length ? FY.pays.map((p, i) => `<div class="row payr"><input type="date" class="pd" data-i="${i}" value="${esc(p.d)}" max="${today()}" aria-label="Payment ${i + 1} date"><input type="number" class="pa" data-i="${i}" inputmode="decimal" placeholder="Amount ₹" value="${p.a ?? ""}" aria-label="Payment ${i + 1} amount"><button class="btn alt sm" data-a="fyPayDel" data-i="${i}" aria-label="Remove payment ${i + 1}">✕</button></div>`).join("") : `<p class="sub">No payments recorded yet.</p>`;
+  document.querySelectorAll("#fypl .pd").forEach(e => { e.oninput = () => { FY.pays[+e.dataset.i].d = e.value; dirty = true; }; });
+  document.querySelectorAll("#fypl .pa").forEach(e => { e.oninput = () => { FY.pays[+e.dataset.i].a = e.value === "" ? "" : +e.value; dirty = true; fyDue(); }; });
+  fyDue();
 }
-A.fyM = b => { const k = b.dataset.k, v = FY.ms[k] || 0, n = v === 0 ? 2 : v === 2 ? 1 : 0; n ? FY.ms[k] = n : delete FY.ms[k]; dirty = true; fyGrid(); };
+A.fyPayAdd = () => { FY.pays.push({ d: today(), a: "" }); dirty = true; fyPays(); const a = document.querySelectorAll("#fypl .pa"); if (a.length) a[a.length - 1].focus(); };
+A.fyPayDel = b => { FY.pays.splice(+b.dataset.i, 1); dirty = true; fyPays(); };
+function fyDue() {
+  const t = +$("fyt").value, p = fyPaySum();
+  $("fydue").innerHTML = t > 0 ? `Paid <b>${rupee(p)}</b> · Due <b>${rupee(Math.max(0, t - p))}</b> of ${rupee(t)} · one month = ${rupee(t / 12)}` : (p > 0 ? `Paid so far <b>${rupee(p)}</b>. Enter the yearly total to see the due amount and to mark months from an amount.` : "Enter the yearly total to see the due amount and to mark months from an amount.");
+}
+// tap a month: everything up to it becomes fully paid; tapping the last paid month again cycles full → half → unpaid
+A.fyM = b => {
+  const L = fyMonths(FY.y), j = L.findIndex(m => m.k === b.dataset.k); let last = -1; L.forEach((m, i) => { if (FY.ms[m.k]) last = i; });
+  if (j === last) { if (FY.ms[L[j].k] === 2) FY.ms[L[j].k] = 1; else delete FY.ms[L[j].k]; }
+  else L.forEach((m, i) => { if (i <= j) FY.ms[m.k] = 2; else delete FY.ms[m.k]; });
+  dirty = true; fyGrid();
+};
 A.fyQ = b => { const q = +b.dataset.q, ks = fyMonths(FY.y).slice(q * 3, q * 3 + 3).map(m => m.k), all = ks.every(k => FY.ms[k] === 2); ks.forEach(k => all ? delete FY.ms[k] : FY.ms[k] = 2); dirty = true; fyGrid(); };
 function fySeq(n) { FY.ms = {}; fyMonths(FY.y).forEach((m, i) => { if (i + 1 <= n) FY.ms[m.k] = 2; else if (i < n) FY.ms[m.k] = 1; }); dirty = true; fyGrid(); }
-A.fyUpto = () => { const j = $("fyu").value; if (j === "") return toast("Choose the month first.", true); fySeq(+j + ($("fyh").checked ? .5 : 1)); };
-A.fyAmt = () => { const t = +$("fyt").value, p = +$("fyp").value; if (!(t > 0) || !(p >= 0)) return toast("Enter the yearly total and the amount paid.", true); fySeq(Math.min(12, Math.round(p / (t / 12) * 2) / 2)); };
+A.fyAmt = () => { const t = +$("fyt").value, p = fyPaySum(); if (!(t > 0) || !(p > 0)) return toast("Enter the yearly total and add a payment first.", true); fySeq(Math.min(12, Math.round(p / (t / 12) * 2) / 2)); };
 A.fySave = b => busy(b, async () => {
-  const total = +$("fyt").value || 0, pRaw = $("fyp").value, paid = pRaw === "" ? null : +pRaw, sid = FY.sid;
-  if (paid != null && (paid < 0 || (total && paid > total))) return $("e2").textContent = "Paid amount cannot be more than the total.";
+  const total = +$("fyt").value || 0, sid = FY.sid, t0 = today(), err = $("e2");
+  for (const p of FY.pays) {
+    const hasA = p.a !== "" && p.a != null;
+    if (!hasA && !p.d) continue;
+    if (!(+p.a > 0)) return err.textContent = "Enter the amount for every payment (or remove the row).";
+    if (p.d && (!/^\d{4}-\d{2}-\d{2}$/.test(p.d) || p.d > t0)) return err.textContent = "A payment date is not valid (it cannot be in the future).";
+  }
+  const pays = FY.pays.filter(p => +p.a > 0).map(p => p.d ? { d: p.d, a: +p.a } : { a: +p.a }).sort((x, y) => (x.d || "").localeCompare(y.d || ""));
+  const paid = pays.length ? Math.round(pays.reduce((n, p) => n + p.a, 0) * 100) / 100 : null;
+  if (paid != null && total && paid > total) return err.textContent = "Paid amount cannot be more than the total.";
   const has = Object.keys(FY.ms).length || total || paid != null;
-  const v = has ? Object.assign({ months: FY.ms, by: S.me.name, t: Date.now() }, total ? { total } : {}, paid != null ? { paid } : {}) : null;
+  const v = has ? Object.assign({ months: FY.ms, by: S.me.name, t: Date.now() }, total ? { total } : {}, paid != null ? { paid, pays } : {}) : null;
   const cls = C.cls; patchQ(P.k("fees", cls), [{ k: `${fyKey(FY.y)}.${sid}`, v }], e => { toast("Fee entry was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFee($("cbody")); const n = entryNext("e", sid); n ? feeOpen(n.id) : closeSheet(true); toast("Saved");
 });
