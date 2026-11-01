@@ -171,6 +171,7 @@ function conflictSheet(title, theirs, mine, keepAct, mineAct, extra) {
 let dirty = false;
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
 /* ===== Fluid animations ("Visuals" setting): liquid menu bar, stacked-card loader, cards that grow out of the button you tap. "Classic" keeps the old look. ===== */
+let FXOSRC = null;
 let FXM = (() => { try { return localStorage.fx === "old" ? "old" : "new"; } catch { return "new"; } })(), FXSRC = null, FXCLOSE = 0;
 const fxOn = () => document.documentElement.dataset.fx === "new";
 const fxApply = () => { document.documentElement.dataset.fx = FXM === "new" && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "new" : "old"; };
@@ -181,8 +182,8 @@ document.addEventListener("pointerdown", e => { const b = e.target.closest("butt
 const fxKids = (el, delay = 120, step = 45, max = 10) => { if (!el.animate) return; [...el.children].slice(0, max).forEach((c, i) => { if (c.classList.contains("xclose")) return; c.animate([{ opacity: 0, transform: "translateY(16px)", filter: "blur(6px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }], { duration: 520, delay: delay + i * step, easing: FX_EASE, fill: "backwards" }); }); };
 /* a pop-up card: starts as the tapped button (same place, size, colour) and grows into the card, content blurs in one piece at a time */
 function fxOpen(s) {
-  if (!fxOn() || !s.animate || Date.now() - FXCLOSE < 700) return;
-  const src = FXSRC && Date.now() - FXSRC.t < 2500 && FXSRC.el.isConnected !== false ? FXSRC : null, to = s.getBoundingClientRect();
+  if (!fxOn() || !s.animate) return;
+  const src = FXSRC && Date.now() - FXSRC.t < 2500 && FXSRC.el.isConnected !== false ? FXSRC : null, to = s.getBoundingClientRect(); FXOSRC = src; if (src) src.used = true;
   if (src && to.width > 10) {
     const f = src.rect, sx = Math.max(f.width / to.width, .06), sy = Math.max(f.height / to.height, .04), r = Math.min(f.height / 2, 28);
     const dx = f.left + f.width / 2 - (to.left + to.width / 2), dy = f.top + f.height / 2 - (to.top + to.height / 2);
@@ -204,12 +205,41 @@ function fxReveal(el, src) {
 new MutationObserver(ms => {
   const src = FXSRC; if (!fxOn() || !src || !src.grow || src.used || Date.now() - src.t > 6000) return;
   for (const m of ms) {
-    if ([...m.removedNodes].some(n => n.nodeType === 1 && (n.matches(".card") || n.querySelector(".card")))) continue;       // a redraw of a card that was already there: no animation
     for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; const c = n.matches(".card") ? n : n.querySelector(".card"); if (c && c.isConnected) { src.used = true; return fxReveal(c, src); } }
   }
 }).observe(document.getElementById("view"), { childList: true, subtree: true });
+
+/* closing animations: the card shrinks back into the button it came from (or slides away), the dim layer fades; inline cards fade and sink */
+function fxSheetOut() {
+  const s = $("sheet"); if (!fxOn() || !s.animate || s.classList.contains("hide")) return;
+  const r = s.getBoundingClientRect(); if (r.width < 40 || r.height < 40) return;
+  const g = s.cloneNode(true); g.removeAttribute("id"); g.querySelectorAll("[id]").forEach(x => x.removeAttribute("id")); g.classList.add("fxs");
+  Object.assign(g.style, { position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", right: "auto", bottom: "auto", margin: "0", maxHeight: "none", overflow: "hidden", pointerEvents: "none", animation: "none", boxSizing: "border-box" });
+  const v = $("veil").cloneNode(false); v.removeAttribute("id"); v.classList.remove("hide"); v.classList.add("fxs"); Object.assign(v.style, { animation: "none", pointerEvents: "none" });
+  document.body.append(v, g);
+  v.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 300, fill: "forwards" });
+  const src = FXOSRC && FXOSRC.el.isConnected ? FXOSRC : null, sr = src && src.el.getBoundingClientRect(), kids = [...g.children];
+  let d = 340;
+  if (sr && sr.width > 4 && sr.bottom > 0 && sr.top < innerHeight) {
+    const sx = Math.max(sr.width / r.width, .06), sy = Math.max(sr.height / r.height, .04), dx = sr.left + sr.width / 2 - (r.left + r.width / 2), dy = sr.top + sr.height / 2 - (r.top + r.height / 2), rad = Math.min(sr.height / 2, 28);
+    let bg = getComputedStyle(src.el).backgroundColor; if (!bg || /rgba?\(.*,\s*0\)$|transparent/.test(bg)) bg = getComputedStyle(g).backgroundColor; d = 440;
+    g.animate([{ transform: "none", borderRadius: "28px" }, { transform: `translate(${dx}px,${dy}px) scale(${sx},${sy})`, borderRadius: `${rad / sx}px / ${rad / sy}px`, backgroundColor: bg }], { duration: d, easing: "cubic-bezier(.6,0,.25,1)", fill: "forwards" });
+    g.animate([{ opacity: 1 }, { opacity: 1, offset: .8 }, { opacity: 0 }], { duration: d, fill: "forwards" });
+  } else g.animate([{ transform: "none", opacity: 1, filter: "blur(0)" }, { transform: "translateY(48px) scale(.96)", opacity: 0, filter: "blur(6px)" }], { duration: d, easing: "cubic-bezier(.5,0,.75,0)", fill: "forwards" });
+  kids.forEach(c => c.animate([{ opacity: 1 }, { opacity: 0 }], { duration: 160, fill: "forwards" }));
+  setTimeout(() => { g.remove(); v.remove(); }, d + 80);
+}
+function fxCardOut(host) {
+  if (!fxOn() || !host || !host.animate) return; const old = host.querySelector(":scope>.card"); if (!old) return;
+  const r = old.getBoundingClientRect(); if (r.width < 40 || r.height < 20 || r.bottom < 0 || r.top > innerHeight) return;
+  const g = old.cloneNode(true); g.querySelectorAll("[id]").forEach(x => x.removeAttribute("id")); g.classList.add("fxg");
+  Object.assign(g.style, { position: "fixed", left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px", margin: "0", overflow: "hidden", pointerEvents: "none", zIndex: 35, boxSizing: "border-box" });
+  document.body.appendChild(g);
+  g.animate([{ opacity: 1, transform: "none", filter: "blur(0)" }, { opacity: 0, transform: "translateY(16px) scale(.97)", filter: "blur(6px)" }], { duration: 300, easing: "cubic-bezier(.5,0,.75,0)", fill: "forwards" });
+  setTimeout(() => g.remove(), 380);
+}
 /* new page: the content blurs in card by card */
-function fxPlay(root) { if (!fxOn()) return; root.classList.remove("fxgo"); void root.offsetWidth; root.classList.add("fxgo"); clearTimeout(fxPlay.t); fxPlay.t = setTimeout(() => root.classList.remove("fxgo"), 1200); }
+function fxPlay(root) { if (!fxOn() || root.querySelector(".hero")) return; root.classList.remove("fxgo"); void root.offsetWidth; root.classList.add("fxgo"); clearTimeout(fxPlay.t); fxPlay.t = setTimeout(() => root.classList.remove("fxgo"), 1200); }
 /* liquid menu bar: one blob slides to the chosen button (phones: it sits in a notch that follows it) */
 let NVB = null;
 function navSet(html) {
@@ -225,9 +255,9 @@ function navPaint() {
 }
 addEventListener("resize", () => { clearTimeout(navPaint.t); navPaint.t = setTimeout(navPaint, 120); });
 
-function sheet(html) { const s = $("sheet"), opening = s.classList.contains("hide"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); if (opening) fxOpen(s); dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
+function sheet(html) { const s = $("sheet"), opening = s.classList.contains("hide"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); if (opening) { const fresh = FXSRC && FXSRC.t > FXCLOSE; if (Date.now() - FXCLOSE < 700 && !fresh) { document.querySelectorAll(".fxs").forEach(x => x.remove()); } else queueMicrotask(() => fxOpen(s)); } dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
 const sheetL = h => { sheet(h); $("sheet").oninput = null; };
-function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); FXCLOSE = Date.now(); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
+function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; fxSheetOut(); $("veil").classList.add("hide"); FXCLOSE = Date.now(); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").classList.contains("hide")) closeSheet(); });
 A.close = () => closeSheet();
@@ -263,6 +293,7 @@ const noAccess = what => `<div class="card empty"><b>Nothing to show yet</b><p c
 /* ---------- universal alphabet entry (used by marks, notebooks, fines, calls, fees) ---------- */
 const ENT = {};
 function entry(host, o) {      // o: {id, cls, done(s), tail(s), pick(sid), counter=true, note}
+  if (FXSRC && FXSRC.grow && Date.now() - FXSRC.t < 6000) fxCardOut(host);       // the card being replaced leaves with an exit animation
   ENT[o.id] = Object.assign({ letter: "", q: "", counter: true }, o);
   host.innerHTML = `<div class="card entry"><div class="row between"><b id="${o.id}-cnt" class="cnt"></b><input id="${o.id}-q" class="find" placeholder="Search name" aria-label="Search student"></div>
    <div class="bar"><i id="${o.id}-bar"></i></div>${o.note ? `<div class="notes">${o.note}</div>` : ""}${o.tools ? `<div class="row tools">${o.tools}</div>` : ""}
@@ -519,7 +550,7 @@ A.mDelT = b => {
   if (!confirm(`Delete the test “${t.name}” (${fmtD(t.date)}) and its ${ids.length} saved marks? This cannot be undone.`)) return;
   const ops = [...ids.map(id => ({ k: `marks.${tid}.${id}`, v: null })), { k: `marks.${tid}`, v: null }, { k: "tests." + tid, v: null }];
   patchQAll(path, ops, e => { toast("Test not deleted: " + e.message, true); mHist(); });
-  if (M.tid === tid && M.path === path) { $("mentry").innerHTML = ""; M = {}; }
+  if (M.tid === tid && M.path === path) { fxCardOut($("mentry")); $("mentry").innerHTML = ""; M = {}; }
   toast("Test deleted"); mHist();
 };
 let CF = {};
@@ -2147,7 +2178,7 @@ async function start(pre) {
   if (pre && pre.config && pre.students) { S.cfg = pre.config; S.students = pre.students; } else [S.cfg, S.students] = await Promise.all([api("GET", "/config"), api("GET", "/students")]);   // a fresh sign-in already brings both
 
   $("login").classList.add("hide"); $("app").classList.remove("hide"); $("avb").textContent = S.me.name[0].toUpperCase();
-  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); loadAssets(pre); buildNav(); renderSide(); paintKeep(); go("home"); showResume(); flushQueue(); syncBadge(); if (KEEP) applyIdle();
+  lastAct = Date.now(); TH = themeGet(S.me.username); themeApply(); loadAssets(pre); buildNav(); renderSide(); paintKeep(); fxBoot(); go("home"); showResume(); flushQueue(); syncBadge(); if (KEEP) applyIdle();
   setTimeout(() => { const c = inchargeClasses()[0]; if (c && c !== H.cls) bundleFast(c, () => { }, true).catch(() => { }); }, 3000);   // warm up the incharge screens
 }
 function buildNav() {
@@ -2185,17 +2216,18 @@ A.pinSave = b => busy(b, async () => { if ($("np").value !== $("np2").value) ret
 
 /* ----- right panel (profile + this week's monitors over the school skyline) ----- */
 const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8a7a"/><stop offset="1" stop-color="#0b4a4a"/></linearGradient></defs>
- <circle cx="238" cy="52" r="20" fill="#dfe97a" opacity=".9"/><g fill="#fff" opacity=".35"><ellipse cx="60" cy="40" rx="30" ry="7"/><ellipse cx="90" cy="48" rx="22" ry="6"/></g>
+ <circle class="ksun" cx="238" cy="52" r="20" fill="#dfe97a" opacity=".9"/><g class="kcl" fill="#fff" opacity=".35"><ellipse cx="60" cy="40" rx="30" ry="7"/><ellipse cx="90" cy="48" rx="22" ry="6"/></g>
  <rect x="0" y="212" width="300" height="38" fill="url(#gw)"/>
  <g><path d="M0 212 Q40 188 90 206 T190 204 T300 196 V214 H0z" fill="#5bb98c"/><path d="M0 220 Q70 204 150 218 T300 212 V232 H0z" fill="#2d8a7a" opacity=".8"/></g>
- <g><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><polygon points="150,88 170,95 150,102" fill="#e2574c"/>
+ <g class="ksch"><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><polygon points="150,88 170,95 150,102" fill="#e2574c"/>
  ${[104, 124, 166, 186].map(x => `<rect x="${x}" y="164" width="14" height="18" rx="2" fill="#2d8a7a"/>`).join("")}<rect x="140" y="186" width="20" height="26" rx="3" fill="#0b4a4a"/>${[78, 206].map(x => `<rect x="${x}" y="182" width="14" height="14" rx="2" fill="#2d8a7a"/>`).join("")}</g>
- <g><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></svg>`;
+ <g class="ktr"><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></svg>`;
 const CREDIT = `<div class="credit"><img src="logo.svg" alt="" width="24" height="24" decoding="async"><span>Designed by <b>Anmol Virk</b></span></div>`;
 function renderSide() {
   const cls = myClasses().includes(H.cls) ? H.cls : myClasses()[0];
-  $("side").innerHTML = `<div class="sp"><div class="av big2">${esc(S.me.name[0].toUpperCase())}</div><b>${esc(S.me.name)}</b><small>${esc(roleLine())}</small><button class="btn pillbtn" data-a="profile">${ic("edit", 16)} Edit profile</button>
+  const sideH = `<div class="sp"><div class="av big2">${esc(S.me.name[0].toUpperCase())}</div><b>${esc(S.me.name)}</b><small>${esc(roleLine())}</small><button class="btn pillbtn" data-a="profile">${ic("edit", 16)} Edit profile</button>
    <div class="sbox"><small>Class</small><b>${cls ? esc(cls) : "—"}</b><span class="arrow">${esc(todayLabel())}</span></div></div><h2 class="sch">${esc(S.cfg.school)}</h2>${SKY}${CREDIT}`;
+  if ($("side")._h !== sideH) { $("side")._h = sideH; $("side").innerHTML = sideH; }
 }
 const todayLabel = () => new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 $("avb").onclick = () => A.profile();
@@ -2206,10 +2238,33 @@ V.home = async host => {
   setTitle("Hello, " + S.me.name.split(" ")[0], "Let's check your progress");
   const cs = myClasses(); if (!cs.length) return host.innerHTML = noAccess("No class or subject is assigned to you yet. Ask the admin.");
   if (!cs.includes(H.cls)) H.cls = cs[0];
-  host.innerHTML = SK; const t = VT;
+  host.innerHTML = fxOn() ? SKH : SK; const t = VT;
   await bundleFast(H.cls, () => { if (!stale(t)) homeDraw(host); });
 };
+
+/* ===== home page intro (skeleton -> cards glare in, ring pulses, bars grow, side panel rises) ===== */
+const SKH = `<div class="skw skwh" aria-busy="true" aria-label="Loading"><div class="skh"><div class="gchips"><i></i><i></i><i></i><i></i></div>
+ <div class="gr3"><div class="gc"><span class="gb"></span><span class="gl m"></span><span class="gl s"></span><span class="gp"></span></div><div class="gc"><span class="gb"></span><span class="gl m"></span><span class="gl s"></span><span class="gp"></span></div><div class="gc"><span class="gb"></span><span class="gl m"></span><span class="gl s"></span><span class="gp"></span></div></div>
+ <div class="gr2"><div class="gc"><span class="gb tall"></span><span class="gl m"></span><span class="gl s"></span></div><div class="gc"><span class="gb tall"></span><span class="gl m"></span><span class="gl s"></span></div></div>
+ <div class="gr2"><div class="gc"><span class="gl m"></span><span class="gb"></span></div><div class="gc"><span class="gl m"></span><span class="gb"></span></div></div>
+ <svg class="spk" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 1c.7 6 5 10.3 11 11-6 .7-10.3 5-11 11-.7-6-5-10.3-11-11 6-.7 10.3-5 11-11z"/></svg></div></div>`;
+function countUp(el, delay) {
+  const t = el.textContent, m = t.match(/^(\D*?)(\d[\d,]*\.?\d*)(.*)$/); if (!m) return; const to = parseFloat(m[2].replace(/,/g, "")), dec = (m[2].split(".")[1] || "").length; if (!(to > 0) || !el.animate) return;
+  const t0 = performance.now() + delay, show = v => (el.textContent = m[1] + v.toFixed(dec) + m[3]); show(0);
+  const step = now => { const p = Math.min(1, Math.max(0, (now - t0) / 1000)); show(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(step); else el.textContent = t; };
+  requestAnimationFrame(step);
+}
+function homeIntro(host) {
+  host.classList.remove("hin"); void host.offsetWidth;
+  const idx = (sel, step = 1) => host.querySelectorAll(sel).forEach((el, i) => el.style.setProperty("--i", i * step));
+  idx(".chips>*"); idx(".stat"); idx(".hb2"); idx(".gantt .grow"); idx(".todo"); idx(".grid2>.card");
+  host.querySelectorAll(".spark path").forEach(p => p.setAttribute("pathLength", "100"));
+  host.querySelectorAll(".stat .tag b").forEach((b, i) => countUp(b, 520 + i * 220));
+  host.classList.add("hin"); clearTimeout(homeIntro.t); homeIntro.t = setTimeout(() => host.classList.remove("hin"), 4200);
+}
+function fxBoot() { if (!fxOn()) return; const h = document.documentElement; h.classList.add("boot"); clearTimeout(fxBoot.t); fxBoot.t = setTimeout(() => h.classList.remove("boot"), 4200); }
 function homeDraw(host) {
+  const intro = fxOn() && !!host.querySelector(".skw");
   const cs = myClasses(), cls = H.cls, st = stats(cls), inch = inchargeClasses().includes(cls), all = classStudents(cls), subs = subjectsOf(cls), T = today();
   const risk = st.rows.filter(r => r.risk.length), enteredToday = new Set(), month = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10), fort = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);
   subs.forEach(s => Object.entries(((D[P.nb(cls, s)] || {}).entries || {})[T] || {}).forEach(([sid]) => enteredToday.add(sid)));
@@ -2230,10 +2285,10 @@ function homeDraw(host) {
   const cats = monCats(cls);
   host.innerHTML = `${cs.length > 1 ? `<div class="row chips">${cs.map(c => `<button class="chip ${c === cls ? "on" : ""}" data-a="hCls" data-c="${esc(c)}">Class ${esc(c)}</button>`).join("")}</div>` : ""}
    <div class="hero"><div class="stats">${cards}</div>
-   <div class="card statc"><h3>Statistics</h3><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="6"/><circle cx="60" cy="60" r="52" fill="none" stroke="var(--deep)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${C2 * ring / 100} ${C2}" transform="rotate(-90 60 60)"/></svg><div class="rc2">${ic("cap", 34)}</div></div>${cov.map(c => `<div class="hb2"><div class="row between"><small>${c[0]}</small><b>${Math.round(c[1])}%</b></div><div class="bar"><i style="width:${c[1]}%"></i></div></div>`).join("")}</div></div>
+   <div class="card statc"><h3>Statistics</h3><div class="ring"><svg viewBox="0 0 120 120"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--line)" stroke-width="6"/><circle cx="60" cy="60" r="52" fill="none" stroke="var(--deep)" stroke-width="6" stroke-linecap="round" stroke-dasharray="${ring.toFixed(1)} 100" pathLength="100" transform="rotate(-90 60 60)"/></svg><div class="rc2">${ic("cap", 34)}</div></div>${cov.map(c => `<div class="hb2"><div class="row between"><small>${c[0]}</small><b>${Math.round(c[1])}%</b></div><div class="bar"><i style="width:${c[1]}%"></i></div></div>`).join("")}</div></div>
    <div class="grid2"><div class="card"><h3>${inch && cats.length ? "This week's monitors" : "Your subjects"}</h3>${inch && cats.length ? `<div class="gantt">${cats.map((c, i) => { const m = monitorFor(cls, 0, i); return `<div class="grow"><span>${esc(c)}</span><i class="mp p${i % 3}" style="margin-left:${(i * 9) % 36}%">${m.s ? esc(m.s.name) : "—"}</i></div>`; }).join("")}</div>` : `<div class="row chips">${subs.map(s => `<span class="chip">${esc(s)}</span>`).join("")}</div>`}</div>
    <div class="card"><h3>To do</h3>${todo.slice(0, 5).map(t => `<button class="todo" data-a="nav" data-v="${t[0]}"><span class="tic">${ic(t[1], 20)}</span><span><b>${esc(t[2])}</b><small>${esc(t[3])}</small></span></button>`).join("") || `<p class="sub">All caught up. 🎉</p>`}<p style="text-align:center"><button class="btn" data-a="nav" data-v="marks">Enter test marks</button></p></div></div>`;
-  renderSide();
+  renderSide(); if (intro) homeIntro(host);
 }
 A.hCls = b => { H.cls = b.dataset.c; V.home($("view")); };
 
