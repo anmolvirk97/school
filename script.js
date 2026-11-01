@@ -170,9 +170,64 @@ function conflictSheet(title, theirs, mine, keepAct, mineAct, extra) {
 /* ---------- bottom sheet (entry card) with unsaved-change guard ---------- */
 let dirty = false;
 const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
-function sheet(html) { const s = $("sheet"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
+/* ===== Fluid animations ("Visuals" setting): liquid menu bar, stacked-card loader, cards that grow out of the button you tap. "Classic" keeps the old look. ===== */
+let FXM = (() => { try { return localStorage.fx === "old" ? "old" : "new"; } catch { return "new"; } })(), FXSRC = null, FXCLOSE = 0;
+const fxOn = () => document.documentElement.dataset.fx === "new";
+const fxApply = () => { document.documentElement.dataset.fx = FXM === "new" && !matchMedia("(prefers-reduced-motion: reduce)").matches ? "new" : "old"; };
+fxApply();
+const FX_EASE = "cubic-bezier(.22,1,.36,1)";
+/* remember the button the person just tapped: its position is where the next card grows from */
+document.addEventListener("pointerdown", e => { const b = e.target.closest("button,.btn,[data-a]"); FXSRC = b ? { el: b, rect: b.getBoundingClientRect(), t: Date.now(), inSheet: !!b.closest("#sheet"), grow: b.classList.contains("btn") && !b.classList.contains("sm") && !b.closest("#sheet"), used: false } : null; }, true);
+const fxKids = (el, delay = 120, step = 45, max = 10) => { if (!el.animate) return; [...el.children].slice(0, max).forEach((c, i) => { if (c.classList.contains("xclose")) return; c.animate([{ opacity: 0, transform: "translateY(16px)", filter: "blur(6px)" }, { opacity: 1, transform: "none", filter: "blur(0)" }], { duration: 520, delay: delay + i * step, easing: FX_EASE, fill: "backwards" }); }); };
+/* a pop-up card: starts as the tapped button (same place, size, colour) and grows into the card, content blurs in one piece at a time */
+function fxOpen(s) {
+  if (!fxOn() || !s.animate || Date.now() - FXCLOSE < 700) return;
+  const src = FXSRC && Date.now() - FXSRC.t < 2500 && FXSRC.el.isConnected !== false ? FXSRC : null, to = s.getBoundingClientRect();
+  if (src && to.width > 10) {
+    const f = src.rect, sx = Math.max(f.width / to.width, .06), sy = Math.max(f.height / to.height, .04), r = Math.min(f.height / 2, 28);
+    const dx = f.left + f.width / 2 - (to.left + to.width / 2), dy = f.top + f.height / 2 - (to.top + to.height / 2);
+    let bg = getComputedStyle(src.el).backgroundColor; if (!bg || /rgba?\(.*,\s*0\)$|transparent/.test(bg)) bg = getComputedStyle(s).backgroundColor;
+    s.animate([{ transform: `translate(${dx}px,${dy}px) scale(${sx},${sy})`, borderRadius: `${r / sx}px / ${r / sy}px`, backgroundColor: bg }, { transform: "none", borderRadius: "28px", backgroundColor: getComputedStyle(s).backgroundColor }], { duration: 540, easing: "cubic-bezier(.2,.85,.25,1.06)" });
+    fxKids(s, 230, 45);
+  } else {
+    s.animate([{ transform: "translateY(46px) scale(.96)", opacity: 0, filter: "blur(6px)" }, { transform: "none", opacity: 1, filter: "blur(0)" }], { duration: 480, easing: FX_EASE });
+    fxKids(s, 90, 35);
+  }
+}
+/* an inline card (data entry card, notebook card ...) that appears after a button tap opens like a circle growing out of that button */
+function fxReveal(el, src) {
+  const r = el.getBoundingClientRect(), f = src.rect; if (!el.animate || r.width < 40 || r.height < 20) return;
+  const ox = Math.min(Math.max(f.left + f.width / 2 - r.left, 0), r.width), oy = Math.min(Math.max(f.top + f.height / 2 - r.top, 0), r.height), big = Math.hypot(Math.max(ox, r.width - ox), Math.max(oy, r.height - oy)) + 24;
+  el.animate([{ clipPath: `circle(8px at ${ox}px ${oy}px)`, opacity: .2 }, { clipPath: `circle(${big}px at ${ox}px ${oy}px)`, opacity: 1 }], { duration: 640, easing: FX_EASE });
+  fxKids(el, 160, 40, 8);
+}
+new MutationObserver(ms => {
+  const src = FXSRC; if (!fxOn() || !src || !src.grow || src.used || Date.now() - src.t > 6000) return;
+  for (const m of ms) {
+    if ([...m.removedNodes].some(n => n.nodeType === 1 && (n.matches(".card") || n.querySelector(".card")))) continue;       // a redraw of a card that was already there: no animation
+    for (const n of m.addedNodes) { if (n.nodeType !== 1) continue; const c = n.matches(".card") ? n : n.querySelector(".card"); if (c && c.isConnected) { src.used = true; return fxReveal(c, src); } }
+  }
+}).observe(document.getElementById("view"), { childList: true, subtree: true });
+/* new page: the content blurs in card by card */
+function fxPlay(root) { if (!fxOn()) return; root.classList.remove("fxgo"); void root.offsetWidth; root.classList.add("fxgo"); clearTimeout(fxPlay.t); fxPlay.t = setTimeout(() => root.classList.remove("fxgo"), 1200); }
+/* liquid menu bar: one blob slides to the chosen button (phones: it sits in a notch that follows it) */
+let NVB = null;
+function navSet(html) {
+  const n = $("nav"); if (!NVB) { NVB = document.createElement("i"); NVB.className = "nvb"; NVB.setAttribute("aria-hidden", "true"); n.prepend(NVB); n.classList.add("nvinit"); }
+  [...n.children].forEach(c => { if (c !== NVB) c.remove(); }); n.insertAdjacentHTML("beforeend", html); navPaint();
+}
+function navPaint() {
+  const n = $("nav"), on = n && n.querySelector("button.on"); if (!on || !NVB) return;
+  const ph = matchMedia("(max-width:700px)").matches, x = on.offsetLeft + on.offsetWidth / 2, key = Math.round(ph ? x : on.offsetTop);
+  n.style.setProperty("--nx", x + "px"); NVB.style.setProperty("--bx", (ph ? x - 25 : on.offsetLeft) + "px"); NVB.style.setProperty("--by", (ph ? -7 : on.offsetTop) + "px");
+  if (n.dataset.px !== undefined && n.dataset.px !== String(key) && fxOn()) { NVB.classList.remove("nvgo"); void NVB.offsetWidth; NVB.classList.add("nvgo"); }
+  n.dataset.px = key; if (n.classList.contains("nvinit")) requestAnimationFrame(() => requestAnimationFrame(() => n.classList.remove("nvinit")));
+}
+addEventListener("resize", () => { clearTimeout(navPaint.t); navPaint.t = setTimeout(navPaint, 120); });
+
+function sheet(html) { const s = $("sheet"), opening = s.classList.contains("hide"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); if (opening) fxOpen(s); dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
 const sheetL = h => { sheet(h); $("sheet").oninput = null; };
-function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
+function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; $("veil").classList.add("hide"); FXCLOSE = Date.now(); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
 addEventListener("keydown", e => { if (e.key === "Escape" && !$("sheet").classList.contains("hide")) closeSheet(); });
 A.close = () => closeSheet();
@@ -252,7 +307,7 @@ const pill = (t, c = "") => `<span class="pill ${c}">${esc(t)}</span>`;
 /* ---------- views registry ---------- */
 const V = {};
 let VT = 0; const stale = t => t !== VT;                    // VT changes on every page switch, so slow loads never paint over a newer page
-const SK = `<div class="skw" aria-busy="true" aria-label="Loading"><div class="sk" style="height:44px;width:55%"></div><div class="skg"><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div></div><div class="sk" style="height:230px"></div><div class="sk" style="height:140px"></div></div>`;
+const SK = `<div class="skw" aria-busy="true" aria-label="Loading"><div class="sk" style="height:44px;width:55%"></div><div class="skg"><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div><div class="sk" style="height:84px"></div></div><div class="sk" style="height:230px"></div><div class="sk" style="height:140px"></div><div class="ldx"><div class="ldst"><i></i><i></i><i></i></div><div class="ldr"><b></b><b></b><b></b></div></div></div>`;
 /* Show saved data instantly (stale-while-revalidate), then fetch fresh data and redraw only if something changed. */
 function bundlePaths(cls) { const p = []; subjectsOf(cls).forEach(s => p.push(P.marks(cls, s), P.nb(cls, s), P.syl(cls, s))); if (inchargeClasses().includes(cls)) ["fines", "calls", "fees", "monitors", "attendance"].forEach(k => p.push(P.k(k, cls))); return p; }
 async function bundleFast(cls, render, quiet) {
@@ -1933,19 +1988,22 @@ function themeSave() { try { localStorage.theme = JSON.stringify(TH); if (S.me) 
 themeApply(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeApply); setInterval(() => { if (TH.mode === "time") themeApply(); }, 60000);
 function themeSheet() {
   const t = TH, tile = (k, name, sub) => `<button class="thtile th-${k}${t.night === k ? " on" : ""}" data-a="thNight" data-k="${k}" aria-pressed="${t.night === k}"><span class="thprev"><i></i><i></i></span><b>${name}</b><small>${sub}</small></button>`;
-  sheetL(`<h2>Appearance</h2><p class="sub">Choose when night mode is used and how it looks.</p>
+  sheetL(`<h2>Visuals</h2><p class="sub">Night mode, its look, and animations.</p>
    <h4>Day or night</h4><div class="seg wrap">${[["system", "Phone setting"], ["day", "Always day"], ["night", "Always night"], ["time", "By time"]].map(([k, v]) => `<button class="${t.mode === k ? "on" : ""}" data-a="thMode" data-k="${k}">${v}</button>`).join("")}</div>
    ${t.mode === "time" ? `<div class="row"><label class="fl">Night starts<input type="time" id="thf" value="${esc(t.from)}" data-c="thTime"></label><label class="fl">Day starts<input type="time" id="tht" value="${esc(t.to)}" data-c="thTime"></label></div>` : ""}
    <h4>Night style</h4><div class="thgrid">${tile("legacy", "Classic night", "The original dark teal")}${tile("dark", "Darker night", "Deeper and calm, no glow")}${tile("neon", "Darker + neon", "Glowing edges and accents")}</div>
+   <h4>Animations</h4><div class="seg">${[["new", "Fluid (new)"], ["old", "Classic"]].map(([k, v]) => `<button class="${FXM === k ? "on" : ""}" data-a="fxSet" data-k="${k}" aria-pressed="${FXM === k}">${v}</button>`).join("")}</div>
+   <p class="sub">${matchMedia("(prefers-reduced-motion: reduce)").matches ? "Your phone asks for reduced motion, so animations stay simple. " : ""}Fluid: stacked-card loader, a liquid menu bar, and cards that grow out of the button you tap. Classic: the original animations.</p>
    <p class="sub">${t.mode === "day" ? "Night style applies when night mode is on." : "Now showing: " + (themeResolve(t) === "day" ? "day" : "night") + " mode."}</p><button class="btn" data-a="close">Done</button>`);
 }
 A.theme = themeSheet;
+A.fxSet = b => { FXM = b.dataset.k; try { localStorage.fx = FXM; } catch { } fxApply(); navPaint(); themeSheet(); };
 A.thMode = b => { TH.mode = b.dataset.k; themeSave(); themeSheet(); };
 A.thNight = b => { TH.night = b.dataset.k; if (TH.mode === "day") TH.mode = "system"; themeSave(); themeSheet(); };
 A.thTime = () => { TH.from = $("thf").value || TH.from; TH.to = $("tht").value || TH.to; themeSave(); };
 
 /* ===== session guard: activity tracking, 1-minute idle sign-out (10 s warning), wipe of local data on every sign-out ===== */
-const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume"];
+const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume", "fx"];
 const idleMin = () => { const v = +localStorage.idlem; return IDLE_OPTS.includes(v) ? v : 1; };            // minutes of inactivity before auto sign-out (this device)
 let KEEP = false; try { KEEP = sessionStorage.keep === "1"; } catch { }                                    // "stay signed in" lock for this session
 const srvIdle = () => KEEP ? 43200 : idleMin() * 60 + 30, idleTxt = () => idleMin() === 1 ? "a minute" : idleMin() + " minutes";
@@ -2097,13 +2155,13 @@ function buildNav() {
   if (inchargeClasses().length) items.push(["cls", "cls", "My class"]);
   items.push(["ins", "chart", "Insights"]); if (S.me.role === "admin") items.push(["admin", "admin", "Admin"]);
   items.push(["out", "out", "Log out"]);
-  $("nav").innerHTML = items.map(([v, i, t]) => `<button data-a="nav" data-v="${v}" aria-label="${t}" title="${t}" class="${v === cur ? "on" : ""}">${ic(i)}</button>`).join("");
+  navSet(items.map(([v, i, t]) => `<button data-a="nav" data-v="${v}" aria-label="${t}" title="${t}" class="${v === cur ? "on" : ""}">${ic(i)}</button>`).join(""));
 }
 A.nav = b => b.dataset.v === "out" ? A.logout() : go(b.dataset.v);
 
 async function go(v) {
-  if (!closeSheet()) return; const rb = $("rsm"); if (rb) rb.classList.add("hide"); cur = v; VT++; buildNav(); $("view").innerHTML = SK; $("gres").innerHTML = "";
-  try { await V[v]($("view")); } catch (e) { $("view").innerHTML = `<div class="card empty"><b>Could not load this page</b><p class="sub">${esc(e.message)}</p></div>`; }
+  if (!closeSheet()) return; const rb = $("rsm"); if (rb) rb.classList.add("hide"); if (FXSRC) FXSRC.used = true; cur = v; VT++; buildNav(); $("view").innerHTML = SK; $("gres").innerHTML = "";
+  try { await V[v]($("view")); fxPlay($("view")); } catch (e) { $("view").innerHTML = `<div class="card empty"><b>Could not load this page</b><p class="sub">${esc(e.message)}</p></div>`; }
   scrollTo(0, 0);
 }
 const roleLine = () => S.me.role === "admin" ? "Admin" : (S.me.inchargeOf ? "Teacher · Incharge of " + S.me.inchargeOf : "Teacher");
@@ -2118,7 +2176,7 @@ A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.data
 /* ----- profile ----- */
 /* ----- profile: avatar, name, username + role, theme, signature screen, PIN ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
-  <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Theme &amp; night mode</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent logins</b>${ic("chevr", 18)}</button></div>
+  <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Visuals</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent logins</b>${ic("chevr", 18)}</button></div>
   <h3 style="margin-top:18px">Auto sign-out</h3><div class="form"><label>Sign out after being inactive for<select data-c="idleSet" ${KEEP ? "disabled" : ""}>${IDLE_OPTS.map(m => `<option value="${m}" ${idleMin() === m ? "selected" : ""}>${m === 1 ? "1 minute" : m + " minutes"}</option>`).join("")}</select></label><button type="button" class="prow2" data-a="keepTog"><span>${ic("lock", 18)}</span><b>${KEEP ? "Stay signed in is ON · tap to turn off" : "Keep me signed in (lock)"}</b></button></div>
   <h3 style="margin-top:18px">Change PIN</h3><div class="form"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN" autocomplete="current-password"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN" autocomplete="new-password"><input id="np2" type="password" inputmode="numeric" maxlength="6" placeholder="Repeat new PIN" aria-label="Repeat new PIN" autocomplete="new-password"></div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
