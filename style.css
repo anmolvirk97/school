@@ -339,3 +339,90 @@ html[data-fx=new] nav.nvinit,html[data-fx=new] nav.nvinit .nvb{transition:none!i
  html[data-fx=new] nav button.on svg{transform:translateY(-14px)}
 }
 html[data-theme=neon][data-fx=new] nav .nvb{box-shadow:0 0 18px #dfe97a99}
+
+/* ========== 3. student lists: two names side by side (more columns on wider screens) ========== */
+.elist{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;align-content:start}
+.elist>p{grid-column:1/-1}
+.elist .st{margin:0;min-width:0;min-height:58px;padding:9px 12px;flex-direction:column;align-items:flex-start;justify-content:center;gap:2px;border-radius:16px}
+.elist .st>span:first-child{max-width:100%;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.2;font-size:clamp(13px,3.7vw,15px);overflow-wrap:anywhere}
+.elist .st .tail{max-width:100%;font-size:12px;line-height:1.25;overflow-wrap:anywhere}
+.elist .st:not(.done) .tail:empty{display:none}
+@media(min-width:701px){.elist{grid-template-columns:repeat(auto-fill,minmax(190px,1fr))}.elist .st>span:first-child{font-size:15px}}
+
+/* ========== 2. closing animations: ghosts are the cards that are leaving ========== */
+.fxs.sheet,.fxs.veil{z-index:42}.fxs.veil{z-index:40}.fxg{z-index:35}
+
+/* ========== 1. home page intro ========== */
+.skh,.skwh{position:relative}.skh{display:none}
+html[data-fx=new] .skw.skwh>*:not(.skh){display:none}
+html[data-fx=new] .skh{display:grid;gap:14px;min-height:70vh}
+.skh .gchips{display:flex;gap:8px}.skh .gchips i{height:38px;width:92px;border-radius:19px;background:var(--line);opacity:.8}.skh .gchips i:first-child{background:color-mix(in srgb,var(--lime) 55%,var(--line))}
+.skh .gr3{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.skh .gr2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+.skh .gc{position:relative;overflow:hidden;display:grid;gap:9px;padding:14px;border-radius:24px;border:1px solid var(--line);background:color-mix(in srgb,var(--card) 80%,transparent);animation:skhIn .6s cubic-bezier(.22,1,.36,1) backwards}
+.skh .gc:nth-child(2){animation-delay:.08s}.skh .gc:nth-child(3){animation-delay:.16s}.skh .gr2 .gc:nth-child(2){animation-delay:.1s}
+.skh .gc::after{content:"";position:absolute;inset:0;background:linear-gradient(100deg,transparent 30%,#ffffff14 50%,transparent 70%);transform:translateX(-100%);animation:skhSweep 1.8s ease-in-out infinite}
+.skh .gb{height:64px;border-radius:16px;border:1px solid var(--line)}.skh .gb.tall{height:120px}.skh .gl{height:10px;border-radius:6px;background:var(--line)}.skh .gl.m{width:72%}.skh .gl.s{width:42%}.skh .gp{height:28px;width:86px;border-radius:14px;background:var(--line)}
+.skh .spk{position:absolute;right:6px;bottom:0;width:30px;height:30px;fill:var(--mut);opacity:.5;animation:spkPulse 1.8s ease-in-out infinite}
+@keyframes skhIn{from{opacity:0;transform:translateY(14px)}}@keyframes skhSweep{to{transform:translateX(100%)}}@keyframes spkPulse{50%{transform:scale(1.25) rotate(20deg);opacity:.9}}
+@property --rp{syntax:"<percentage>";inherits:false;initial-value:0%}
+html[data-fx=new] .hin{--e:cubic-bezier(.22,1,.36,1)}
+/* chips pop in left to right */
+html[data-fx=new] .hin .chips>*{animation:fxIn .6s var(--e) backwards;animation-delay:calc(.05s + var(--i,0) * 70ms)}
+/* cards: rise out of the blur, a glare crosses each one, the sparkline draws itself, numbers count up */
+html[data-fx=new] .hin .stat{position:relative;overflow:hidden;animation:statIn .8s var(--e) backwards;animation-delay:calc(.25s + var(--i,0) * 220ms)}
+html[data-fx=new] .hin .stat>*{animation:fxIn .6s var(--e) backwards;animation-delay:calc(.55s + var(--i,0) * 220ms)}
+html[data-fx=new] .hin .stat::after{content:"";position:absolute;inset:-20% -30%;pointer-events:none;background:linear-gradient(115deg,transparent 35%,#ffffffcc 48%,#ffffff55 54%,transparent 62%);transform:translateX(-120%);animation:glare 1.05s ease-in-out forwards;animation-delay:calc(.5s + var(--i,0) * 220ms)}
+html[data-fx=new] .hin .spark path{stroke-dasharray:100;animation:sparkDraw 1.3s ease-in-out backwards;animation-delay:calc(.8s + var(--i,0) * 220ms)}
+@keyframes statIn{from{opacity:0;transform:translateY(28px) scale(.95);filter:blur(10px) brightness(.6)}}
+@keyframes glare{to{transform:translateX(120%)}}
+@keyframes sparkDraw{from{stroke-dashoffset:100}to{stroke-dashoffset:0}}
+/* statistics card: centre badge springs up, ripples spread, the arc and bars fill with a glowing head */
+html[data-fx=new] .hin .statc{animation:statIn .8s var(--e) backwards;animation-delay:1s}
+html[data-fx=new] .hin .rc2 svg{animation:badgePop .9s cubic-bezier(.3,1.5,.5,1) backwards;animation-delay:1.25s}
+html[data-fx=new] .hin .ring svg circle:nth-child(2){animation:ringDraw 1.3s cubic-bezier(.4,0,.2,1) backwards;animation-delay:1.35s}
+html[data-fx=new] .hin .ring::before,html[data-fx=new] .hin .ring::after{content:"";position:absolute;inset:6px;border-radius:50%;border:2px solid var(--green);opacity:0;pointer-events:none;animation:ripple 2.2s ease-out 2;animation-delay:1.4s}
+html[data-fx=new] .hin .ring::after{animation-delay:1.9s}
+html[data-fx=new] .hin .hb2{animation:fxIn .6s var(--e) backwards;animation-delay:calc(1.5s + var(--i,0) * 140ms)}
+html[data-fx=new] .hin .hb2 .bar i{position:relative;animation:barGrow 1.1s cubic-bezier(.4,0,.2,1) backwards;animation-delay:calc(1.6s + var(--i,0) * 140ms)}
+html[data-fx=new] .hin .hb2 .bar i::after{content:"";position:absolute;right:-3px;top:50%;width:12px;height:12px;margin-top:-6px;border-radius:50%;background:#fff;box-shadow:0 0 10px 3px var(--lime);animation:headFade 2.6s ease-out forwards;animation-delay:calc(1.6s + var(--i,0) * 140ms)}
+@keyframes badgePop{from{transform:scale(.3);opacity:0}}
+@keyframes ringDraw{from{stroke-dasharray:0 100}}
+@keyframes ripple{0%{transform:scale(.55);opacity:.8}100%{transform:scale(1.85);opacity:0}}
+@keyframes barGrow{from{width:0}}@keyframes headFade{0%,70%{opacity:1}100%{opacity:0}}
+/* lower cards: bars wipe in from the left, to-do rows slide in from the right */
+html[data-fx=new] .hin .grid2>.card{animation:statIn .8s var(--e) backwards;animation-delay:calc(1.5s + var(--i,0) * 150ms)}
+html[data-fx=new] .hin .gantt .grow{animation:fxIn .5s var(--e) backwards;animation-delay:calc(1.8s + var(--i,0) * 110ms)}
+html[data-fx=new] .hin .mp{animation:mpWipe .8s var(--e) backwards;animation-delay:calc(1.9s + var(--i,0) * 110ms)}
+@keyframes mpWipe{from{clip-path:polygon(0 0,0 0,0 50%,0 100%,0 100%);opacity:.3}}
+html[data-fx=new] .hin .todo{animation:todoIn .6s var(--e) backwards;animation-delay:calc(2s + var(--i,0) * 120ms)}
+html[data-fx=new] .hin .todo .tic{animation:badgePop .6s cubic-bezier(.3,1.5,.5,1) backwards;animation-delay:calc(2.1s + var(--i,0) * 120ms)}
+@keyframes todoIn{from{opacity:0;transform:translateX(34px);filter:blur(6px)}}
+
+/* first screen after signing in: header, menu and the school panel arrive too */
+html.boot[data-fx=new] .top>*{animation:fxIn .65s cubic-bezier(.22,1,.36,1) backwards}
+html.boot[data-fx=new] .top>*:nth-child(2){animation-delay:.08s}html.boot[data-fx=new] .top>*:nth-child(3){animation-delay:.16s}html.boot[data-fx=new] .top>*:nth-child(n+4){animation-delay:.24s}
+html.boot[data-fx=new] nav{animation:navUp .8s cubic-bezier(.22,1,.36,1) .1s backwards}
+html.boot[data-fx=new] nav button{animation:fxIn .55s cubic-bezier(.22,1,.36,1) backwards}
+html.boot[data-fx=new] nav button:nth-child(2){animation-delay:.3s}html.boot[data-fx=new] nav button:nth-child(3){animation-delay:.36s}html.boot[data-fx=new] nav button:nth-child(4){animation-delay:.42s}html.boot[data-fx=new] nav button:nth-child(5){animation-delay:.48s}html.boot[data-fx=new] nav button:nth-child(n+6){animation-delay:.54s}
+html.boot[data-fx=new] nav .nvb{animation:bubPop .7s cubic-bezier(.3,1.6,.5,1) .55s backwards}
+@keyframes navUp{from{transform:translateX(-100%)}}
+@keyframes bubPop{from{scale:0;opacity:0}}
+@media(max-width:700px){@keyframes navUp{from{transform:translateY(120%)}}}
+/* school panel: rises from the bottom (slides in from the left when it is a side column); avatar ring draws, name blurs in, school pops up */
+html.boot[data-fx=new] .side{animation:sideUp 1s cubic-bezier(.22,1,.36,1) 1.5s backwards}
+@keyframes sideUp{from{transform:translateY(70%);opacity:0}}
+@media(min-width:1180px){html.boot[data-fx=new] .side{animation-name:sideIn;animation-delay:.2s}@keyframes sideIn{from{transform:translateX(-60px);opacity:0}}}
+html.boot[data-fx=new] .side .sp .av{position:relative;animation:badgePop .8s cubic-bezier(.3,1.5,.5,1) 1.9s backwards}
+html.boot[data-fx=new] .side .sp .av::before{content:"";position:absolute;inset:-6px;border-radius:50%;background:conic-gradient(var(--lime) var(--rp),#0000 0);-webkit-mask:radial-gradient(farthest-side,#0000 calc(100% - 3px),#000 calc(100% - 2px));mask:radial-gradient(farthest-side,#0000 calc(100% - 3px),#000 calc(100% - 2px));animation:rpDraw 1.1s ease-out 2.1s both}
+@keyframes rpDraw{from{--rp:0%}to{--rp:100%}}
+html.boot[data-fx=new] .side .sp>b,html.boot[data-fx=new] .side .sp>small,html.boot[data-fx=new] .side .sp>.pillbtn,html.boot[data-fx=new] .side .sp>.sbox{animation:fxIn .6s cubic-bezier(.22,1,.36,1) 2.1s backwards}
+html.boot[data-fx=new] .side .sp>small{animation-delay:2.2s}html.boot[data-fx=new] .side .sp>.pillbtn{animation-delay:2.3s}html.boot[data-fx=new] .side .sp>.sbox{animation-delay:2.4s}
+html.boot[data-fx=new] .side .sch{animation:schRise .8s cubic-bezier(.22,1,.36,1) 2.2s backwards}
+@keyframes schRise{from{opacity:0;transform:translateY(34px);filter:blur(6px)}}
+html.boot[data-fx=new] .side .sky .ksch{transform-box:fill-box;transform-origin:50% 100%;animation:skyPop .9s cubic-bezier(.3,1.4,.5,1) 2.3s backwards}
+html.boot[data-fx=new] .side .sky .ktr{transform-box:fill-box;transform-origin:50% 100%;animation:skyPop .8s cubic-bezier(.3,1.4,.5,1) 2.5s backwards}
+html.boot[data-fx=new] .side .sky .ksun{animation:sunRise 1.2s cubic-bezier(.22,1,.36,1) 2.5s backwards}
+html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1,.36,1) 2.6s backwards}
+@keyframes skyPop{from{transform:translateY(26px) scale(.8);opacity:0}}
+@keyframes sunRise{from{transform:translateY(40px);opacity:0}}
+@keyframes cloudIn{from{transform:translateX(-40px);opacity:0}}
