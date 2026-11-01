@@ -406,6 +406,17 @@ const weekIdx = d => Math.floor((d.getTime() / 864e5 + 3) / 7);
 /* ===== modules.js ===== */
 /* ===== Test marks + Notebooks ===== */
 let M = {}, MH = { all: false };
+const MTOPICS = ["Summary", "Question answers", "Exercise", "Word meanings", "Full chapter"];
+/* fill the chapter drop-down of the test setup from the subject's chapter list (Notebooks → Edit chapters) */
+async function mChapters() {
+  const sel = $("tch"); if (!sel) return; const c = $("mc").value, s = $("ms").value, keep = sel.value; let ch = [];
+  try { const [sy] = await load([P.syl(c, s)]); ch = ((sy && sy.chapters) || []).filter(x => x && x.n); } catch { }
+  if ($("tch") !== sel || $("mc").value !== c || $("ms").value !== s) return;            // class or subject changed while loading
+  sel.innerHTML = `<option value="">Choose chapter</option>` + ch.map((x, i) => `<option value="${esc(x.n)}" ${x.n === keep ? "selected" : ""}>${i + 1}. ${esc(x.n)}</option>`).join("") + `<option value="__other" ${keep === "__other" || !ch.length ? "selected" : ""}>Other (type a test name)</option>`;
+  A.mChSel(sel);
+}
+A.mChSel = sel => { const o = sel.value === "__other", n = $("tname"); n.classList.toggle("hide", !o); if (o && document.activeElement === sel) n.focus(); };
+A.mTp = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); };
 const mk = sid => getAt(D[M.path] || {}, ["marks", M.tid, sid]);
 const mTxt = e => e.ab ? "Absent" : e.g ? "Grade " + e.g + (e.m != null ? " · " + e.m + "/" + e.max : "") : e.th != null ? e.m + "/" + e.max + " (" + e.th + " + " + e.as + ")" : e.m + "/" + e.max;
 const tMaxTxt = (t, c, s) => t.term && subMode(c, s) === "grade" ? "graded" : t.amax != null ? `out of ${t.max} (${t.tmax} theory + ${t.amax} assessment)` : `out of ${t.max}`;
@@ -414,9 +425,9 @@ const tLbl = (c, sub, t) => t.term && subMode(c, sub) === "grade" ? "Grade" : "/
 V.marks = async host => {
   setTitle("Test marks", "Set the test once, then tap names to enter marks.");
   if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div class="row"><input id="tname" placeholder="Test name (e.g. Unit 1)"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div class="row"><select id="tch" data-c="mChSel" aria-label="Chapter for the test"><option value="">Choose chapter</option></select><input id="tname" class="hide" placeholder="Test name (e.g. Unit 1)" aria-label="Test name"></div><div class="row chips" id="ttpl" role="group" aria-label="Topics">${MTOPICS.map(t => `<button class="chip" data-a="mTp" data-t="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join("")}</div><div class="row"><input id="trm" placeholder="Remarks (optional)" aria-label="Remarks"></div><div class="row"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
    <div id="mhist"></div><div id="mentry"></div>`;
-  fillPair("m"); A.pairDone_m = mHist; mHist();
+  fillPair("m"); A.pairDone_m = () => { mHist(); mChapters(); }; mHist(); mChapters();
 };
 /* test history: every test of the chosen class + subject, with open / edit / delete */
 async function mHist() {
@@ -429,11 +440,12 @@ async function mHist() {
 A.mHAll = () => { MH.all = !MH.all; mHist(); };
 A.mResume = b => busy(b, () => mRun($("mentry"), $("mc").value, $("ms").value, b.dataset.t));
 A.mStart = b => busy(b, async () => {
-  const c = $("mc").value, s = $("ms").value, name = $("tname").value.trim(), max = +$("max").value, date = $("tdate").value;
-  if (!name || !(max > 0) || !date) return toast("Add a test name, max marks and date.", true);
+  const c = $("mc").value, s = $("ms").value, chv = $("tch").value, base = chv === "__other" ? $("tname").value.trim() : chv, max = +$("max").value, date = $("tdate").value,
+    tps = [...document.querySelectorAll("#ttpl .chip.on")].map(x => x.dataset.t), rm = $("trm").value.trim(), name = base && tps.length ? base + " – " + tps.join(", ") : base;
+  if (!name || !(max > 0) || !date) return toast("Choose the chapter (or type a test name), then add max marks and date.", true);
   const path = P.marks(c, s); await load([path], true);
   const same = Object.entries(D[path].tests || {}).find(([, t]) => !t.term && t.name.toLowerCase() === name.toLowerCase() && t.date === date), tid = same ? same[0] : slug(name) + "_" + date;
-  if (!same) patchQ(path, [{ k: "tests." + tid, v: { name, date, max, by: S.me.name } }], e => { toast("The test was not saved: " + e.message, true); if (M.tid === tid) { $("mentry").innerHTML = ""; M = {}; } mHist(); });
+  if (!same) patchQ(path, [{ k: "tests." + tid, v: Object.assign({ name, date, max, by: S.me.name }, chv && chv !== "__other" ? { ch: chv } : {}, tps.length ? { tp: tps } : {}, rm ? { rm } : {}) }], e => { toast("The test was not saved: " + e.message, true); if (M.tid === tid) { $("mentry").innerHTML = ""; M = {}; } mHist(); });
   await mRun($("mentry"), c, s, tid, false, true); mHist();
 });
 /* open the name list for one test (used by unit tests and term exams) */
@@ -442,7 +454,7 @@ async function mRun(host, c, s, tid, quiet, local) {
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
   rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
-  entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}`,
+  entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}${t.rm ? " · " + esc(t.rm) : ""}`,
     tools: `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
     done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? esc(mTxt(e)) : ""; }, pick: mOpen });
   if (!quiet) host.scrollIntoView({ behavior: "smooth" });
@@ -451,14 +463,14 @@ function mOpen(id) {
   const s = stuById(id), e = mk(id) || { m: "", max: M.max, r: "" }, md = M.mode, T = M.t || {};
   let body;
   if (md === "grade") body = `<p class="sub">Award a grade for this exam. Marks are optional and are not printed on mark sheets or report cards.</p><select id="mg" aria-label="Grade" autofocus><option value="">Choose grade</option>${gradeList().map(g => `<option ${e.g === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><p></p><div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks (optional)" enterkeyhint="done" value="${e.m ?? ""}" placeholder="Marks (optional)"><b>/</b><input class="big" id="mx" type="number" inputmode="decimal" aria-label="Max marks" value="${e.max || M.max || ""}" placeholder="Max"></div>`;
-  else if (md === "split") body = `<p class="sub">Total = theory + assessment (out of ${M.max}). Only the total is printed on mark sheets and report cards.</p><div class="row mid"><label class="fl">Theory<input class="big" id="mth" type="number" inputmode="decimal" value="${e.th ?? ""}" placeholder="0" autofocus></label><b>/ ${T.tmax ?? "?"}</b></div><div class="row mid"><label class="fl">Assessment<input class="big" id="mas" type="number" inputmode="decimal" enterkeyhint="done" value="${e.as ?? ""}" placeholder="0"></label><b>/ ${T.amax ?? "?"}</b></div><p class="sub" id="mtot"></p>`;
+  else if (md === "split") body = `<p class="sub">Type the total (out of ${M.max}), or enter theory and assessment and the total is calculated. Only the total is printed on mark sheets and report cards.</p><div class="row mid"><label class="fl">Total<input class="big" id="mtt" type="number" inputmode="decimal" value="${e.m ?? ""}" placeholder="0" autofocus></label><b>/ ${M.max}</b></div><p class="sub">Theory and assessment (optional)</p><div class="row mid"><label class="fl">Theory<input class="big" id="mth" type="number" inputmode="decimal" value="${e.th ?? ""}" placeholder="–"></label><b>/ ${T.tmax ?? "?"}</b></div><div class="row mid"><label class="fl">Assessment<input class="big" id="mas" type="number" inputmode="decimal" enterkeyhint="done" value="${e.as ?? ""}" placeholder="–"></label><b>/ ${T.amax ?? "?"}</b></div><p class="sub" id="mtot"></p>`;
   else body = `<div class="row mid"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>`;
   sheet(`<h2>${esc(s.name)}</h2>${e.ab ? `<p class="sub">Currently marked absent.</p>` : ""}${body}
    <p><input id="mr" placeholder="Remark (optional)" value="${esc(e.r || "")}" style="width:100%"></p>
    <div class="row"><button class="btn" data-a="mSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="mSkip" data-id="${esc(id)}">Skip</button></div>
    <div class="row"><button class="btn alt sm" data-a="mAbsOne" data-id="${esc(id)}">Absent / did not give test</button>${mk(id) ? `<button class="btn alt sm" data-a="mDelOne" data-id="${esc(id)}">Delete entry</button>` : ""}</div><div class="err" id="e2"></div>`);
   $("sheet").onkeydown = ev => { if (ev.key === "Enter" && ev.target.tagName !== "SELECT") A.mSave($("sheet").querySelector("[data-a=mSave]")); };
-  if (md === "split") { const upd = () => { const a = $("mth").value, b = $("mas").value; $("mtot").textContent = a !== "" || b !== "" ? "Total: " + Math.round(((+a || 0) + (+b || 0)) * 100) / 100 + " / " + M.max : ""; }; ["mth", "mas"].forEach(i => $(i).addEventListener("input", upd)); upd(); }
+  if (md === "split") { const tt = $("mtt"), upd = () => { const x = $("mth").value, y = $("mas").value, both = x !== "" && y !== ""; tt.readOnly = both; if (both) tt.value = Math.round((+x + +y) * 100) / 100; $("mtot").textContent = both ? "Total is calculated from theory + assessment." : (x !== "" || y !== "") ? "Enter both theory and assessment to calculate the total." : ""; }; ["mth", "mas"].forEach(i => $(i).addEventListener("input", upd)); upd(); }
 }
 A.mSkip = b => { if (!closeSheet()) return; const n = entryNext("m", b.dataset.id); n ? mOpen(n.id) : 0; };
 async function mPut(id, rec) {
@@ -477,12 +489,16 @@ A.mSave = b => busy(b, async () => {
     const rec = { g }; if (v !== "") { if (!(mx > 0)) return er("Enter the max marks too, or clear the marks."); if (+v < 0 || +v > mx) return er("Marks must be between 0 and " + mx + "."); rec.m = +v; rec.max = mx; }
     return mPut(id, Object.assign(rec, { r, by, t }));
   }
-  if (M.mode === "split") {                                        // term exam of a theory + assessment subject
-    const T = M.t || {}, a = $("mth").value, c = $("mas").value;
-    if (!(T.tmax > 0 && T.amax > 0)) return er("This exam has no theory / assessment maximum. Set it again in Term exams → Start entry.");
-    if (a === "" || c === "") return er("Enter both the theory and the assessment marks.");
-    if (+a < 0 || +a > T.tmax) return er("Theory marks must be between 0 and " + T.tmax + "."); if (+c < 0 || +c > T.amax) return er("Assessment marks must be between 0 and " + T.amax + ".");
-    return mPut(id, { th: +a, as: +c, m: Math.round((+a + +c) * 100) / 100, max: M.max, r, by, t });
+  if (M.mode === "split") {                                        // term exam of a theory + assessment subject: total only, or theory + assessment
+    const T = M.t || {}, a = $("mth").value, c = $("mas").value, tt = $("mtt").value;
+    if ((a === "") !== (c === "")) return er("Enter both theory and assessment, or leave both empty and type only the total.");
+    if (a !== "") {
+      if (!(T.tmax > 0 && T.amax > 0)) return er("This exam has no theory / assessment maximum. Set it again in Term exams → Start entry, or type only the total.");
+      if (+a < 0 || +a > T.tmax) return er("Theory marks must be between 0 and " + T.tmax + "."); if (+c < 0 || +c > T.amax) return er("Assessment marks must be between 0 and " + T.amax + ".");
+      return mPut(id, { th: +a, as: +c, m: Math.round((+a + +c) * 100) / 100, max: M.max, r, by, t });
+    }
+    if (tt === "" || +tt < 0 || +tt > M.max) return er("Total marks must be between 0 and " + M.max + ".");
+    return mPut(id, { m: +tt, max: M.max, r, by, t });
   }
   const v = $("mm").value, mx = +$("mx").value;
   if (v === "" || +v < 0 || +v > mx) return er("Marks must be between 0 and " + mx + ".");
