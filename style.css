@@ -289,7 +289,7 @@ html[data-theme=legacy] .sgsig img,html[data-theme=dark] .sgsig img,html[data-th
 /* quick remarks screen: 6 + 3 columns so all buttons fit a phone; wider on tablets */
 .qv{min-height:48px;border:2px solid var(--line);border-radius:14px;padding:10px 12px;font-weight:700;font-size:17px;margin:8px 0;word-break:break-word}
 .qb{border-radius:12px;background:var(--lime);color:#0b3d3d;font-weight:800;font-size:15px;min-height:44px;padding:4px 6px;line-height:1.1}.qb.ch{background:var(--deep);color:#fff}.qb.ic{background:var(--card);border:2px solid var(--line);color:var(--ink)}
-.qr6{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;margin-bottom:6px}.qr3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.qr6{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin-bottom:6px}.qr3{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 @media(min-width:700px){.qr3{grid-template-columns:repeat(4,1fr)}.qb{min-height:52px;font-size:17px}}
 .sorter{margin:4px 0 10px}.sorter .li{padding:4px 0}.sorter .link{font-size:18px;padding:4px 10px}
 
@@ -426,3 +426,13 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 @keyframes skyPop{from{transform:translateY(26px) scale(.8);opacity:0}}
 @keyframes sunRise{from{transform:translateY(40px);opacity:0}}
 @keyframes cloudIn{from{transform:translateX(-40px);opacity:0}}
+/* remark pieces + cursor gaps (notebook quick remarks) */
+.qv{display:flex;flex-wrap:wrap;align-items:center;gap:2px;padding:8px 6px}
+.qt{border-radius:10px;background:var(--lime);color:#0b3d3d;font-weight:800;font-size:15px;min-height:38px;min-width:30px;padding:2px 9px;border:2px solid transparent}
+.qt.c{background:var(--deep);color:#fff}.qt.s{background:var(--card);color:var(--ink);border:2px dashed var(--line)}
+.qt.sel{outline:3px solid var(--ink);outline-offset:1px}
+.qg{position:relative;width:12px;min-height:38px;padding:0;background:transparent;border-radius:6px}
+.qg.on{width:18px}.qg.on::after{content:"";position:absolute;left:50%;top:3px;bottom:3px;width:3px;margin-left:-1.5px;border-radius:2px;background:var(--ink);animation:qcur 1s steps(2) infinite}
+@keyframes qcur{50%{opacity:0}}@media(prefers-reduced-motion:reduce){.qg.on::after{animation:none}}
+.qb.sm12{font-size:12px}
+.payr{align-items:center;margin-bottom:6px}.payr .btn{flex:0 0 auto}
