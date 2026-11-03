@@ -452,3 +452,9 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 .syl{margin-top:10px;border:1px solid var(--line);border-radius:16px;padding:6px 12px}.syl summary{cursor:pointer;min-height:40px;display:flex;gap:8px;align-items:center}
 .sylr{padding:8px 0;border-top:1px solid var(--line)}.sylr.dim{opacity:.55}.sylr.hi{background:var(--lime);color:#0b3d3d;border-radius:12px;padding:8px 10px;border-top-color:transparent}.sylr.hi .cct{background:#ffffffb3}
 #tcc .cchips{margin:2px 0 8px}
+
+.chtop .cno{flex:0 0 78px;min-width:0}.chtop .cbk{flex:1;min-width:0}
+.cdn .chips{margin:6px 0 4px}.cdn .chip{min-height:38px;padding:6px 12px;font-size:14px}
+.sub.bk{margin:12px 0 4px;font-weight:800;color:var(--ink)}
+.cct.ok{background:var(--deep);color:#fff}.chip.dimc{opacity:.55}
+.tcb{margin-top:10px}.tcb .chips{margin:6px 0 4px}
