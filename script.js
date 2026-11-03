@@ -406,23 +406,31 @@ const weekIdx = d => Math.floor((d.getTime() / 864e5 + 3) / 7);
 /* ===== modules.js ===== */
 /* ===== Test marks + Notebooks ===== */
 let M = {}, MH = { all: false };
-const MTOPICS = ["Summary", "Question answers", "Exercise", "Word meanings", "Full chapter"];
 /* fill the chapter drop-down of the test setup from the subject's chapter list (Notebooks → Edit chapters) */
-let MCH = [];
+/* test setup: tap the chapter(s), then tap the contents of each chapter. Only contents that are marked completed in the syllabus are offered. */
+let MT = { key: "", sel: [], tp: {}, other: false, list: [] };
 async function mChapters() {
-  const sel = $("tch"); if (!sel) return; const c = $("mc").value, s = $("ms").value, keep = sel.value; let ch = [];
-  try { const [sy] = await load([P.syl(c, s)]); ch = ((sy && sy.chapters) || []).filter(x => x && x.n); } catch { }
-  if ($("tch") !== sel || $("mc").value !== c || $("ms").value !== s) return;            // class or subject changed while loading
-  const v = chFor(ch, termNow()); MCH = v.map(x => x.c);
-  sel.innerHTML = `<option value="">Choose chapter</option>` + v.map((x, j) => `<option value="${esc(x.c.n)}" ${x.c.n === keep ? "selected" : ""}>${j + 1}. ${esc(x.c.n)}</option>`).join("") + `<option value="__other" ${keep === "__other" || !v.length ? "selected" : ""}>Other (type a test name)</option>`;
-  A.mChSel(sel);
+  const box = $("tchb"); if (!box) return; const c = $("mc").value, s = $("ms").value; let ch = [];
+  try { const [sy] = await load([P.syl(c, s)]); ch = (sy && sy.chapters) || []; } catch { }
+  if ($("tchb") !== box || $("mc").value !== c || $("ms").value !== s) return;             // class or subject changed while loading
+  const key = c + "|" + s; if (MT.key !== key) MT = { key, sel: [], tp: {}, other: false, list: [] };
+  MT.list = chFor(ch, termNow()); MT.sel = MT.sel.filter(i => MT.list.some(x => x.i === i)); if (!MT.list.length) MT.other = true;
+  mChDraw();
 }
-A.mChSel = sel => {
-  const o = sel.value === "__other", n = $("tname"); n.classList.toggle("hide", !o); if (o && document.activeElement === sel) n.focus();
-  const x = MCH.find(q => q.n === sel.value), box = $("tcc");                                     // contents of the chosen chapter
-  if (box) box.innerHTML = x && x.c && x.c.length ? `<div class="cchips">${x.c.map(t => `<span class="cct">${esc(t)}</span>`).join("")}</div>` : "";
-};
-A.mTp = b => { const on = !b.classList.contains("on"); b.classList.toggle("on", on); b.setAttribute("aria-pressed", on); };
+function mChDraw() {
+  const L = MT.list;
+  $("tchb").innerHTML = (L.length ? chGroups(L).map(g => bkHead(g.b) + `<div class="row chips" role="group" aria-label="${esc(g.b || "Chapters")}">${g.items.map(x => `<button class="chip${MT.sel.includes(x.i) ? " on" : ""}${taught(x.c) ? "" : " dimc"}" data-a="mChp" data-i="${x.i}" aria-pressed="${MT.sel.includes(x.i)}" title="${esc(x.c.n)}">${esc(chNo(x.c, x.j))}. ${esc(x.c.n.length > 22 ? x.c.n.slice(0, 21) + "…" : x.c.n)}</button>`).join("")}</div>`).join("") : `<p class="sub">No chapters for ${esc(termNow() || "this term")} yet. Add them in Notebooks → Syllabus, or type a test name.</p>`)
+    + `<div class="row chips"><button class="chip${MT.other ? " on" : ""}" data-a="mChOther" aria-pressed="${MT.other}">Other test…</button></div>`;
+  $("tname").classList.toggle("hide", !MT.other); mTopics();
+}
+function mTopics() {
+  const box = $("tcc"); if (!box) return;
+  box.innerHTML = MT.sel.slice().sort((a, z) => a - z).map(i => { const x = MT.list.find(q => q.i === i), c = x.c, dn = chDone(c), tp = MT.tp[i] || [];
+    return `<div class="tcb"><b>${esc(chNo(c, x.j))}. ${esc(c.n)}</b>${dn.length ? `<div class="row chips" role="group" aria-label="Contents of ${esc(c.n)}">${dn.map(t => `<button class="chip${tp.includes(t) ? " on" : ""}" data-a="mTp" data-i="${i}" data-t="${esc(t)}" aria-pressed="${tp.includes(t)}">${esc(t)}</button>`).join("")}</div>` : `<p class="sub">Nothing is marked completed for this chapter in the syllabus yet.</p>`}</div>`; }).join("");
+}
+A.mChp = b => { const i = +b.dataset.i; if (MT.sel.includes(i)) { MT.sel = MT.sel.filter(q => q !== i); delete MT.tp[i]; } else MT.sel.push(i); mChDraw(); };
+A.mChOther = () => { MT.other = !MT.other; mChDraw(); if (MT.other) $("tname").focus(); };
+A.mTp = b => { const i = +b.dataset.i, t = b.dataset.t, a = MT.tp[i] || (MT.tp[i] = []); if (a.includes(t)) a.splice(a.indexOf(t), 1); else a.push(t); mTopics(); };
 const mk = sid => getAt(D[M.path] || {}, ["marks", M.tid, sid]);
 const mTxt = e => e.ab ? "Absent" : e.g ? "Grade " + e.g + (e.m != null ? " · " + e.m + "/" + e.max : "") : e.th != null ? e.m + "/" + e.max + " (" + e.th + " + " + e.as + ")" : e.m + "/" + e.max;
 const tMaxTxt = (t, c, s) => t.term && subMode(c, s) === "grade" ? "graded" : t.amax != null ? `out of ${t.max} (${t.tmax} theory + ${t.amax} assessment)` : `out of ${t.max}`;
@@ -431,7 +439,7 @@ const tLbl = (c, sub, t) => t.term && subMode(c, sub) === "grade" ? "Grade" : "/
 V.marks = async host => {
   setTitle("Test marks", "Set the test once, then tap names to enter marks.");
   if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div class="row"><select id="tch" data-c="mChSel" aria-label="Chapter for the test"><option value="">Choose chapter</option></select><input id="tname" class="hide" placeholder="Test name (e.g. Unit 1)" aria-label="Test name"></div><div id="tcc"></div><div class="row chips" id="ttpl" role="group" aria-label="Topics">${MTOPICS.map(t => `<button class="chip" data-a="mTp" data-t="${esc(t)}" aria-pressed="false">${esc(t)}</button>`).join("")}</div><div class="row"><input id="trm" placeholder="Remarks (optional)" aria-label="Remarks"></div><div class="row"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div id="tchb"></div><div class="row"><input id="tname" class="hide" placeholder="Test name (e.g. Unit 1)" aria-label="Test name"></div><div id="tcc"></div><div class="row"><input id="trm" placeholder="Remarks (optional)" aria-label="Remarks"></div><div class="row"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
    <div id="mhist"></div><div id="mentry"></div>`;
   fillPair("m"); A.pairDone_m = () => { mHist(); mChapters(); }; mHist(); mChapters();
 };
@@ -447,19 +455,21 @@ async function mHist() {
 A.mHAll = () => { MH.all = !MH.all; mHist(); };
 A.mResume = b => busy(b, () => mRun($("mentry"), $("mc").value, $("ms").value, b.dataset.t));
 A.mStart = b => busy(b, async () => {
-  const c = $("mc").value, s = $("ms").value, chv = $("tch").value, base = chv === "__other" ? $("tname").value.trim() : chv, max = +$("max").value, date = $("tdate").value,
-    tps = [...document.querySelectorAll("#ttpl .chip.on")].map(x => x.dataset.t), rm = $("trm").value.trim(), name = base && tps.length ? base + " – " + tps.join(", ") : base;
-  if (!name || !(max > 0) || !date) return toast("Choose the chapter (or type a test name), then add max marks and date.", true);
+  const c = $("mc").value, s = $("ms").value, max = +$("max").value, date = $("tdate").value, rm = $("trm").value.trim();
+  const sel = MT.sel.slice().sort((a, z) => a - z).map(i => MT.list.find(x => x.i === i)).filter(Boolean), multi = sel.length > 1;
+  const tps = sel.flatMap(x => (MT.tp[x.i] || []).map(t => multi ? `${chNo(x.c, x.j)}: ${t}` : t));
+  const base = [sel.map(x => x.c.n).join(", "), MT.other ? $("tname").value.trim() : ""].filter(Boolean).join(", "), name = base && tps.length ? base + " – " + tps.join(", ") : base;
+  if (!name || !(max > 0) || !date) return toast("Tap the chapter(s) (or choose Other and type a test name), then add max marks and date.", true);
   const path = P.marks(c, s); await load([path], true);
   const same = Object.entries(D[path].tests || {}).find(([, t]) => !t.term && t.name.toLowerCase() === name.toLowerCase() && t.date === date), tid = same ? same[0] : slug(name) + "_" + date;
-  if (!same) patchQ(path, [{ k: "tests." + tid, v: Object.assign({ name, date, max, by: S.me.name }, chv && chv !== "__other" ? { ch: chv } : {}, tps.length ? { tp: tps } : {}, rm ? { rm } : {}) }], e => { toast("The test was not saved: " + e.message, true); if (M.tid === tid) { $("mentry").innerHTML = ""; M = {}; } mHist(); });
+  if (!same) patchQ(path, [{ k: "tests." + tid, v: Object.assign({ name, date, max, by: S.me.name }, sel.length ? { ch: sel[0].c.n, chi: sel.map(x => x.i) } : {}, tps.length ? { tp: tps } : {}, rm ? { rm } : {}) }], e => { toast("The test was not saved: " + e.message, true); if (M.tid === tid) { $("mentry").innerHTML = ""; M = {}; } mHist(); });
   await mRun($("mentry"), c, s, tid, false, true); mHist();
 });
 /* open the name list for one test (used by unit tests and term exams) */
 async function mRun(host, c, s, tid, quiet, local) {
   const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
-  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], t.term || termNow(), t.ch); } catch { }
+  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], t.term || termNow(), t.ch, t.chi); } catch { }
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
   rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}${t.rm ? " · " + esc(t.rm) : ""}${syl}`,
@@ -640,12 +650,21 @@ const termNow = () => (S.me && (S.cfg.terms || []).includes(S.me.term)) ? S.me.t
    (a removed chapter stays as st:"gone"), so the ticks of every entry always stay on the right chapter. */
 const inSet = (c, tm) => !c.tm || c.tm === tm;
 const chFor = (ch, tm) => ch.map((c, i) => ({ c, i })).filter(x => x.c.st !== "gone" && inSet(x.c, tm));
+/* a chapter shows the number typed in the syllabus (its position in the term if none was typed); renaming or renumbering it there
+   changes it everywhere at once, because saved notebook records only remember the chapter's place, never its name */
+const chNo = (c, j) => c.no ? String(c.no) : String(j + 1);
+const chLbl = c => (c.no ? c.no + ". " : "") + c.n;
+const chDone = c => c.cm ? ((c.c || []).length ? c.c.slice() : ["Entire chapter"]) : (c.dn || []).filter(t => (c.c || []).includes(t));   // contents marked completed in the syllabus
+const chGroups = list => { const g = []; list.forEach((x, j) => { const b = x.c.b || ""; let q = g.find(z => z.b === b); if (!q) g.push(q = { b, items: [] }); q.items.push(Object.assign({ j }, x)); }); return g; };   // one group per book
+const bkHead = b => b ? `<p class="sub bk">${esc(b)}</p>` : "";
 const nbDone = (e, ch) => { const tm = (e && e.tm) || ""; return ch.reduce((n, c, i) => n + (e && taught(c) && inSet(c, tm) && e.s[i] === 1 ? 1 : 0), 0); };
 const nbTot = (e, ch) => { const tm = (e && e.tm) || ""; return ch.reduce((n, c) => n + (taught(c) && inSet(c, tm) ? 1 : 0), 0); };
 /* chapters with their contents (notes, summary, questions, book exercises ...) - shown on the test screen */
-function sylHTML(ch, tm, hi) {
+function sylHTML(ch, tm, hi, chi) {
   const v = chFor(ch, tm); if (!v.length) return "";
-  return `<details class="syl"${hi ? " open" : ""}><summary><b>Syllabus${tm ? " · " + esc(tm) : ""}</b> <small>${v.length} ${v.length === 1 ? "chapter" : "chapters"}</small></summary>${v.map((x, j) => `<div class="sylr${taught(x.c) ? "" : " dim"}${hi && x.c.n === hi ? " hi" : ""}"><b>${j + 1}. ${esc(x.c.n)}</b>${x.c.c && x.c.c.length ? `<div class="cchips">${x.c.c.map(t => `<span class="cct">${esc(t)}</span>`).join("")}</div>` : ""}</div>`).join("")}</details>`;
+  const on = x => (chi || []).includes(x.i) || (hi && x.c.n === hi);
+  const row = x => { const c = x.c, dn = chDone(c); return `<div class="sylr${taught(c) ? "" : " dim"}${on(x) ? " hi" : ""}"><b>${esc(chNo(c, x.j))}. ${esc(c.n)}</b>${(c.c && c.c.length) || c.cm ? `<div class="cchips">${c.cm ? `<span class="cct ok">✔ Entire chapter</span>` : ""}${(c.c || []).map(t => `<span class="cct${dn.includes(t) ? " ok" : ""}">${dn.includes(t) ? "✔ " : ""}${esc(t)}</span>`).join("")}</div>` : ""}${c.r ? `<small class="sub">${esc(c.r)}</small>` : ""}</div>`; };
+  return `<details class="syl"${hi || (chi && chi.length) ? " open" : ""}><summary><b>Syllabus${tm ? " · " + esc(tm) : ""}</b> <small>${v.length} ${v.length === 1 ? "chapter" : "chapters"} · ✔ = completed</small></summary>${chGroups(v).map(g => bkHead(g.b) + g.items.map(row).join("")).join("")}</details>`;
 }
 
 V.nb = host => {
@@ -678,9 +697,9 @@ A.nView = b => { N.view = b.dataset.v; nbDraw(); };
 function nbHeat() {
   const en = D[N.ep].entries || {}, vis = chFor(N.ch, N.term), st = classStudents(N.cls);
   const last = sid => { const ds = Object.keys(en).filter(k => en[k][sid]).sort(), d = ds.filter(k => (en[k][sid].tm || "") === N.term).pop() || ds.pop(); return d ? { d, e: en[d][sid] } : null; };
-  $("nmain").innerHTML = `<div class="card"><p class="sub">Latest entry for each student${N.term ? " (" + esc(N.term) + " chapters)" : ""}. Tap a name to see, edit or delete all of their entries.</p><div class="scroll"><table class="heat"><thead><tr><th>Student</th>${vis.map((x, j) => `<th title="${esc(x.c.n)}" class="${taught(x.c) ? "" : "dim"}">${j + 1}</th>`).join("")}<th>%</th><th>Last</th></tr></thead><tbody>${st.map(s => { const l = last(s.id), e = l && l.e, ok = x => e && taught(x.c) && inSet(x.c, e.tm || ""), t = e ? vis.filter(ok).length : 0, dn = e ? vis.filter(x => ok(x) && e.s[x.i] === 1).length : 0; return `<tr><td><button class="link nmb" data-a="nHist" data-id="${esc(s.id)}">${esc(s.name)}</button></td>${vis.map(x => `<td><i class="hc ${!ok(x) ? "hn" : "s" + (e.s[x.i] || 0)}"></i></td>`).join("")}<td>${t ? Math.round(dn / t * 100) + "%" : "—"}</td><td><small>${l ? fmtD(l.d) : "—"}</small></td></tr>`; }).join("")}</tbody></table></div>
+  $("nmain").innerHTML = `<div class="card"><p class="sub">Latest entry for each student${N.term ? " (" + esc(N.term) + " chapters)" : ""}. Tap a name to see, edit or delete all of their entries.</p><div class="scroll"><table class="heat"><thead><tr><th>Student</th>${vis.map((x, j) => `<th title="${esc((x.c.b ? x.c.b + ": " : "") + x.c.n)}" class="${taught(x.c) ? "" : "dim"}">${esc(chNo(x.c, j))}${x.c.b ? `<br><small>${esc(x.c.b.slice(0, 3))}</small>` : ""}</th>`).join("")}<th>%</th><th>Last</th></tr></thead><tbody>${st.map(s => { const l = last(s.id), e = l && l.e, ok = x => e && taught(x.c) && inSet(x.c, e.tm || ""), t = e ? vis.filter(ok).length : 0, dn = e ? vis.filter(x => ok(x) && e.s[x.i] === 1).length : 0; return `<tr><td><button class="link nmb" data-a="nHist" data-id="${esc(s.id)}">${esc(s.name)}</button></td>${vis.map(x => `<td><i class="hc ${!ok(x) ? "hn" : "s" + (e.s[x.i] || 0)}"></i></td>`).join("")}<td>${t ? Math.round(dn / t * 100) + "%" : "—"}</td><td><small>${l ? fmtD(l.d) : "—"}</small></td></tr>`; }).join("")}</tbody></table></div>
    <p class="legend"><i class="hc s1"></i> done <i class="hc s2"></i> partial <i class="hc s0"></i> pending <i class="hc hn"></i> no entry / not taught</p>
-   <p class="sub">Chapters: ${vis.map((x, j) => `${j + 1}. ${esc(x.c.n)}`).join(" · ")}</p></div>`;
+   <p class="sub">Chapters: ${chGroups(vis).map(g => (g.b ? esc(g.b) + ": " : "") + g.items.map(x => `${esc(chNo(x.c, x.j))}. ${esc(x.c.n)}`).join(" · ")).join(" | ")}</p></div>`;
 }
 /* every notebook entry of one student for this subject: open (edit) or delete */
 function nHistDraw(id) {
@@ -697,43 +716,69 @@ A.nhDel = b => {
   patchQAll(N.ep, ops, e => { toast("Not deleted: " + e.message, true); nbDraw(); });
   toast(ds.length + " deleted"); nbDraw(); nHistDraw(id);
 };
-/* Syllabus editor: chapters per term, each with its contents. Chapters keep their position: a removed chapter stays as a hidden "gone" row
-   (unless nothing has been entered yet), so ticks already saved never slide onto the wrong chapter. */
+/* Syllabus editor. Per chapter: book, number, name, term, contents (a list), what is completed, remarks.
+   Chapters keep their position: a removed chapter stays as a hidden "gone" row (unless nothing has been entered yet), so ticks already saved
+   never slide onto the wrong chapter. Notebook records store only the position, so editing a name or number here updates every saved record. */
 const CQ = ["Notes", "Summary", "Question answers", "Book exercise", "Worksheet", "Word meanings", "Diagram", "Map work"];
-let CE = {};
+let CE = {}, chT = 0;
+function chLoad(c, o) {
+  const x = { o, b: c.b || "", no: c.no || "", n: c.n || "", tm: c.tm || "", c: (c.c || []).slice(), dn: (c.dn || []).slice(), cm: !!c.cm, nc: c.st === "notcovered", r: c.r || "", gone: c.st === "gone" };
+  if (c.st === "full" && !c.dn && !c.cm) x.cm = true;                                   // chapters saved before "completed" existed
+  if (c.st === "summary" && !c.dn && !c.cm) { if (!x.c.some(t => /summary/i.test(t))) x.c.push("Summary"); x.dn = x.c.filter(t => /summary/i.test(t)); }
+  return x;
+}
 A.nChapters = async b => {
   if (!await nbLoad()) return;
   const en = (D[N.ep] || {}).entries || {};
-  CE = { list: N.ch.map((c, o) => ({ o, n: c.n || "", st: c.st || "full", tm: c.tm || "", c: (c.c || []).slice(), gone: c.st === "gone" })), tab: N.term || "", free: !Object.keys(en).some(d => Object.keys(en[d] || {}).length), dirty: false };
+  CE = { list: N.ch.map(chLoad), tab: N.term || "", free: !Object.keys(en).some(d => Object.keys(en[d] || {}).length), dirty: false };
   chDraw();
 };
 const chShown = x => !x.gone && !x.drop;
+const chDn = (x, j) => `<div class="cdn" data-j="${j}"><small class="sub">Completed</small><div class="row chips">
+  <button type="button" class="chip${!x.cm && !x.nc && !x.dn.length ? " on" : ""}" data-a="chDn" data-k="none" data-j="${j}">Not started</button>${x.c.map(t => `<button type="button" class="chip${x.cm || x.dn.includes(t) ? " on" : ""}" data-a="chDn" data-k="c" data-t="${esc(t)}" data-j="${j}">${esc(t)}</button>`).join("")}<button type="button" class="chip${x.cm ? " on" : ""}" data-a="chDn" data-k="all" data-j="${j}">Entire chapter</button><button type="button" class="chip${x.nc ? " on" : ""}" data-a="chDn" data-k="nc" data-j="${j}">Not covered</button></div></div>`;
 function chRow(x, j) {
   const T = S.cfg.terms || [];
-  return `<div class="crow chc" data-j="${j}"><div class="chtop"><input class="cn" value="${esc(x.n)}" placeholder="Chapter name" aria-label="Chapter name"><button class="link" data-a="chDel" aria-label="Remove chapter">✕</button></div>
-   <div class="chmid"><select class="cs" aria-label="Status">${Object.entries(NBST).map(([k, v]) => `<option value="${k}" ${x.st === k ? "selected" : ""}>${v}</option>`).join("")}</select><select class="ct" data-c="chTm" aria-label="Term"><option value="" ${x.tm ? "" : "selected"}>All terms</option>${T.map(t => `<option ${x.tm === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
-   <textarea class="cc" rows="2" placeholder="Contents, one per line (Notes, Summary, Question answers, Book exercise 1.1 …)" aria-label="Contents">${esc((x.c || []).join("\n"))}</textarea>
-   <select class="cq" data-c="chQ" aria-label="Add a content"><option value="">+ Add content…</option>${CQ.map(t => `<option>${esc(t)}</option>`).join("")}</select></div>`;
+  return `<div class="crow chc" data-j="${j}"><div class="chtop"><input class="cbk" list="bklist" value="${esc(x.b)}" placeholder="Book, e.g. Literature / Grammar (optional)" aria-label="Book name"><button class="link" data-a="chDel" aria-label="Remove chapter">✕</button></div>
+   <div class="chtop"><input class="cno" value="${esc(x.no)}" placeholder="No." maxlength="6" aria-label="Chapter number"><input class="cn" value="${esc(x.n)}" placeholder="Chapter name" aria-label="Chapter name"></div>
+   <div class="chmid"><select class="ct" data-c="chTm" aria-label="Term"><option value="" ${x.tm ? "" : "selected"}>All terms</option>${T.map(t => `<option ${x.tm === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
+   <textarea class="cc" rows="2" placeholder="Contents, one per line (Notes, Summary, Question answers, Book exercise 1.1 …)" aria-label="Contents">${esc(x.c.join("\n"))}</textarea>
+   <select class="cq" data-c="chQ" aria-label="Add a content"><option value="">+ Add content…</option>${CQ.map(t => `<option>${esc(t)}</option>`).join("")}</select>
+   ${chDn(x, j)}<input class="crm" value="${esc(x.r)}" placeholder="Remarks (optional)" aria-label="Chapter remarks"></div>`;
 }
 function chDraw() {
-  const T = S.cfg.terms || [], tabs = [["", "All terms"], ...T.map(t => [t, t])], rows = CE.list.map((x, j) => ({ x, j })).filter(r => chShown(r.x) && r.x.tm === CE.tab);
+  const T = S.cfg.terms || [], tabs = [["", "All terms"], ...T.map(t => [t, t])], rows = CE.list.map((x, j) => ({ x, j })).filter(r => chShown(r.x) && r.x.tm === CE.tab), books = [...new Set(CE.list.filter(chShown).map(x => x.b).filter(Boolean))];
   sheet(`<h2>Syllabus: ${esc(N.cls)} ${esc(N.sub)}</h2><div class="seg wrap" role="tablist" aria-label="Term">${tabs.map(([k, v]) => `<button class="${CE.tab === k ? "on" : ""}" data-a="chTab" data-t="${esc(k)}">${esc(v)} (${CE.list.filter(q => chShown(q) && q.tm === k).length})</button>`).join("")}</div>
-   <p class="sub">${CE.tab ? `Chapters of ${esc(CE.tab)}. They show in notebook entry and on the test screen while ${esc(CE.tab)} is the running term.` : "Chapters in “All terms” show in every term."} Only “Full” and “Summary only” chapters are checked in notebooks. Add new chapters at the end so saved ticks stay in place.</p>
+   <p class="sub">${CE.tab ? `Chapters of ${esc(CE.tab)}: they show in notebooks and on the test screen while ${esc(CE.tab)} is the running term.` : "Chapters in “All terms” show in every term."} Notebooks check only chapters with something completed. Changing a name or number here also changes it in notebook records already saved. Add new chapters at the end.</p>
+   <datalist id="bklist">${books.map(b => `<option value="${esc(b)}">`).join("")}</datalist>
    <div id="chl" class="chl">${rows.map(r => chRow(r.x, r.j)).join("") || `<p class="sub">No chapters here yet.</p>`}</div>
    <p><button class="btn alt" data-a="chAdd">Add chapter</button></p><div class="row"><button class="btn" data-a="chSave" style="flex:2">Save syllabus</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
   dirty = !!CE.dirty;
+  const sh = $("sheet"), prev = sh.oninput; sh.oninput = e => { prev && prev(e); if (e.target.classList && e.target.classList.contains("cc")) { clearTimeout(chT); chT = setTimeout(() => chSync(e.target), 500); } };
 }
 function chCollect() {
   document.querySelectorAll("#chl .chc").forEach(r => {
-    const x = CE.list[+r.dataset.j]; x.n = r.querySelector(".cn").value.trim(); x.st = r.querySelector(".cs").value; x.tm = r.querySelector(".ct").value;
-    x.c = r.querySelector(".cc").value.split("\n").map(q => q.trim().slice(0, 80)).filter(Boolean).slice(0, 20);
+    const x = CE.list[+r.dataset.j]; x.b = r.querySelector(".cbk").value.trim().slice(0, 40); x.no = r.querySelector(".cno").value.trim().slice(0, 6); x.n = r.querySelector(".cn").value.trim(); x.tm = r.querySelector(".ct").value;
+    x.c = [...new Set(r.querySelector(".cc").value.split("\n").map(q => q.trim().slice(0, 80)).filter(Boolean))].slice(0, 20); x.dn = x.dn.filter(t => x.c.includes(t)); x.r = r.querySelector(".crm").value.trim().slice(0, 120);
   });
   if (dirty) CE.dirty = true;
 }
+function chSync(ta) { const r = ta.closest(".chc"); if (!r || !document.body.contains(r)) return; chCollect(); const j = +r.dataset.j, d = r.querySelector(".cdn"); if (d) d.outerHTML = chDn(CE.list[j], j); }   // the "completed" buttons follow the contents list
 A.chTab = b => { chCollect(); CE.tab = b.dataset.t; chDraw(); };
 A.chTm = () => { chCollect(); CE.dirty = true; chDraw(); toast("Chapter moved to that term"); };
-A.chQ = b => { if (!b.value) return; const ta = b.closest(".chc").querySelector(".cc"); ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + "\n" : "") + b.value; b.value = ""; dirty = true; };
-A.chAdd = () => { chCollect(); CE.list.push({ o: -1, n: "", st: "full", tm: CE.tab, c: [] }); CE.dirty = true; chDraw(); const r = [...document.querySelectorAll("#chl .cn")].pop(); if (r) r.focus(); };
+A.chQ = b => { if (!b.value) return; const ta = b.closest(".chc").querySelector(".cc"); ta.value = (ta.value.trim() ? ta.value.replace(/\s+$/, "") + "\n" : "") + b.value; b.value = ""; dirty = true; chSync(ta); };
+A.chDn = b => {
+  chCollect(); const j = +b.dataset.j, x = CE.list[j], k = b.dataset.k, t = b.dataset.t;
+  if (k === "none") { x.cm = false; x.nc = false; x.dn = []; }
+  else if (k === "all") { x.cm = !x.cm; x.nc = false; x.dn = []; }
+  else if (k === "nc") { x.nc = !x.nc; x.cm = false; x.dn = []; }
+  else { x.nc = false; const cur = x.cm ? x.c.slice() : x.dn.slice(); x.cm = false; x.dn = cur.includes(t) ? cur.filter(q => q !== t) : [...cur, t]; }
+  CE.dirty = true; dirty = true; b.closest(".cdn").outerHTML = chDn(x, j);
+};
+A.chAdd = () => {
+  chCollect(); const here = CE.list.filter(q => chShown(q) && q.tm === CE.tab), last = here[here.length - 1], nums = here.filter(q => /^\d+$/.test(q.no) && (!last || q.b === last.b)).map(q => +q.no);
+  CE.list.push({ o: -1, b: last ? last.b : "", no: String((nums.length ? Math.max(...nums) : 0) + 1), n: "", tm: CE.tab, c: [], dn: [], cm: false, nc: false, r: "" }); CE.dirty = true; chDraw();
+  const r = [...document.querySelectorAll("#chl .cn")].pop(); if (r) r.focus();
+};
 A.chDel = b => { chCollect(); const x = CE.list[+b.closest(".chc").dataset.j]; if (x.o < 0 || CE.free) x.drop = true; else x.gone = true; CE.dirty = true; chDraw(); };
 A.chSave = b => busy(b, async () => {
   chCollect(); const out = [];
@@ -741,7 +786,8 @@ A.chSave = b => busy(b, async () => {
     if (x.drop) return;
     if (x.gone || (!x.n && x.o >= 0)) { if (!CE.free) out.push({ n: x.n || "(removed)", st: "gone" }); return; }      // keep its place unless nothing was ever entered
     if (!x.n) return;
-    const o = { n: x.n, st: x.st }; if (x.tm) o.tm = x.tm; if (x.c.length) o.c = x.c; out.push(o);
+    const o = { n: x.n, st: x.nc ? "notcovered" : x.cm ? "full" : x.dn.length ? "summary" : "notstarted" };       // st is what notebooks look at: anything completed = checked
+    if (x.b) o.b = x.b; if (x.no) o.no = x.no; if (x.tm) o.tm = x.tm; if (x.c.length) o.c = x.c; if (x.cm) o.cm = 1; else if (x.dn.length) o.dn = x.dn; if (x.r) o.r = x.r; out.push(o);
   });
   if (!out.some(c => c.st !== "gone")) return $("e2").textContent = "Add at least one chapter.";
   patchQ(N.sp, [{ k: "chapters", v: out }], e => { toast("The syllabus was not saved: " + e.message, true); });
@@ -755,13 +801,13 @@ function nsDraw() {
   if (NS.rem) return nsRemDraw();
   const s = stuById(NS.id), t = N.ch.map((c, i) => c).filter(taught).length;
   $("sheet").innerHTML = `<div class="row between"><h2>${esc(s.name)}</h2><button class="link" data-a="nsMode">${NS.detail ? "Quick strip" : "Individual entry"}</button></div><p class="sub">${fmtD(N.date)} · ${esc(N.sub)}${NS.tm ? " · " + esc(NS.tm) : ""} · ${NS.detail ? "Set each chapter and add remarks" : "Tap a chapter to cycle done → partial → pending"}</p>${(() => { const p = ne(NS.id) ? null : nPrev(NS.id); return p ? `<p class="sub">Last checked ${esc(fmtD(p.d))}: ${nbDone(p.e, N.ch)}/${nbTot(p.e, N.ch)} chapters done. Use “Same as last entry” to start from it.</p>` : ""; })()}` +
-    (NS.detail ? `<div class="chl">${NS.vis.map(({ c, i }, j) => `<div class="crow ${taught(c) ? "" : "dim"}"><span class="cl">${j + 1}. ${esc(c.n)}</span><select data-c="nsSel" data-i="${i}" ${taught(c) ? "" : "disabled"} aria-label="Chapter ${j + 1} status"><option value="1" ${NS.st[i] === 1 ? "selected" : ""}>Done</option><option value="2" ${NS.st[i] === 2 ? "selected" : ""}>Partial</option><option value="0" ${NS.st[i] === 0 ? "selected" : ""}>Pending</option></select><input class="cr" data-i="${i}" placeholder="Remark" value="${esc(NS.cr[i] || "")}" ${taught(c) ? "" : "disabled"}></div>`).join("")}</div><p><input id="nr" placeholder="Overall remark (optional)" value="${esc(NS.r)}" style="width:100%"></p>`
-      : `<div class="chs">${NS.vis.map(({ c, i }, j) => `<button class="ch s${NS.st[i]}" data-a="nbCh" data-i="${i}" title="${esc(c.n)}" ${taught(c) ? "" : "disabled"}>Ch ${j + 1}<br>${taught(c) ? SYM[NS.st[i]] : "–"}</button>`).join("")}</div><p class="sub chnames">${NS.vis.map(({ c }, j) => `${j + 1}. ${esc(c.n)}`).join(" · ")}</p>`) +
+    (NS.detail ? `<div class="chl">${chGroups(NS.vis).map(g => bkHead(g.b) + g.items.map(({ c, i, j }) => `<div class="crow ${taught(c) ? "" : "dim"}"><span class="cl">${esc(chNo(c, j))}. ${esc(c.n)}</span><select data-c="nsSel" data-i="${i}" ${taught(c) ? "" : "disabled"} aria-label="Chapter ${esc(chNo(c, j))} status"><option value="1" ${NS.st[i] === 1 ? "selected" : ""}>Done</option><option value="2" ${NS.st[i] === 2 ? "selected" : ""}>Partial</option><option value="0" ${NS.st[i] === 0 ? "selected" : ""}>Pending</option></select><input class="cr" data-i="${i}" placeholder="Remark" value="${esc(NS.cr[i] || "")}" ${taught(c) ? "" : "disabled"}></div>`).join("")).join("")}</div><p><input id="nr" placeholder="Overall remark (optional)" value="${esc(NS.r)}" style="width:100%"></p>`
+      : `${chGroups(NS.vis).map(g => bkHead(g.b) + `<div class="chs">${g.items.map(({ c, i, j }) => `<button class="ch s${NS.st[i]}" data-a="nbCh" data-i="${i}" title="${esc(c.n)}" ${taught(c) ? "" : "disabled"}>Ch ${esc(chNo(c, j))}<br>${taught(c) ? SYM[NS.st[i]] : "–"}</button>`).join("")}</div><p class="sub chnames">${g.items.map(({ c, j }) => `${esc(chNo(c, j))}. ${esc(c.n)}`).join(" · ")}</p>`).join("")}`) +
     `<div class="row"><button class="btn alt" data-a="nsAll">All done</button><button class="btn alt" data-a="nsLast">Same as last entry</button></div>${NS.detail ? "" : `<p></p><button class="btn alt" data-a="nsRem" style="width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Remarks${NS.r ? ": " + esc(NS.r) : ""}</button>`}<p></p><div class="row"><button class="btn" data-a="nsSave" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="nsSkip">Skip</button></div>${ne(NS.id) ? `<p></p><button class="btn alt sm" data-a="nsDel">Delete this entry</button>` : ""}<div class="err" id="e2"></div>`;
 }
 const nsKeep = () => { if (NS.detail) { document.querySelectorAll(".cr").forEach(i => { i.value.trim() ? NS.cr[i.dataset.i] = i.value.trim() : delete NS.cr[i.dataset.i]; }); const r = $("nr"); if (r) NS.r = r.value; } };
 /* quick remarks screen: tap buttons to build the remark, or open the keyboard */
-const QR_NUM = ["Ch", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], QR_TXT = ["v sh", "sh", "lo", "app", "Q", "diagram", "art work", "pages", "pending", "not done", "given again"];
+const QR_NUM = ["Ch", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"], QR_TXT = ["v sh", "sh", "lo", "app", "Q", "diagram", "art work", "pages", "pending", "not done", "given again", "index", "test rec", "parent sign"];
 /* The remark is a list of pieces (NS.rt) with a cursor (NS.rc) between pieces and an optional selected piece (NS.rs).
    The saved remark stays plain text in NS.r, so old entries and the keyboard box keep working. */
 const qrKind = t => t === "Ch" ? "c" : t === " " ? "s" : /^\d$/.test(t) ? "d" : "t";
@@ -1058,7 +1104,7 @@ A.prGo = b => busy(b, async () => {
       subs.forEach(sub => {
         const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, en = (D[P.nb(c, sub)] || {}).entries || {}, dates = Object.keys(en).filter(inR).sort();
         h += `<h4>${esc(sub)}</h4>`; if (!tc) { h += `<p class="sub">No chapters set for this subject.</p>`; return; }
-        const rows = stu.map(s => { const l = nbLatest(sub, s.id); if (!l.e) return tr([esc(s.name), "0", "—", "—", "—", "—"]); const done = nbDone(l.e, ch), tt = nbTot(l.e, ch) || 1, pend = ch.filter((x, i) => taught(x) && inSet(x, l.e.tm || "") && (l.e.s[i] || 0) !== 1).map(x => x.n).join(", "); return tr([esc(s.name), l.n, fmtD(l.d), `${done}/${tt}`, `<b>${Math.round(done / tt * 100)}%</b>`, esc(pend.length > 70 ? pend.slice(0, 68) + "…" : pend || "—")]); });
+        const rows = stu.map(s => { const l = nbLatest(sub, s.id); if (!l.e) return tr([esc(s.name), "0", "—", "—", "—", "—"]); const done = nbDone(l.e, ch), tt = nbTot(l.e, ch) || 1, pend = ch.filter((x, i) => taught(x) && inSet(x, l.e.tm || "") && (l.e.s[i] || 0) !== 1).map(chLbl).join(", "); return tr([esc(s.name), l.n, fmtD(l.d), `${done}/${tt}`, `<b>${Math.round(done / tt * 100)}%</b>`, esc(pend.length > 70 ? pend.slice(0, 68) + "…" : pend || "—")]); });
         const pcts = stu.map(s => { const l = nbLatest(sub, s.id); return l.e ? nbDone(l.e, ch) / (nbTot(l.e, ch) || 1) * 100 : null; }).filter(x => x != null);
         h += `<p class="sub">Checked on: ${dates.length ? dates.map(fmtD).join(", ") : "no check in this period"} · class completion ${pcts.length ? Math.round(avg(pcts)) + "%" : "—"} · ${pcts.length}/${stu.length} students checked</p>` + tbl(["Student", "Checks", "Last checked", "Chapters done", "%", "Chapters pending"], rows);
       });
