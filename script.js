@@ -719,6 +719,9 @@ A.nhDel = b => {
 /* Syllabus editor. Per chapter: book, number, name, term, contents (a list), what is completed, remarks.
    Chapters keep their position: a removed chapter stays as a hidden "gone" row (unless nothing has been entered yet), so ticks already saved
    never slide onto the wrong chapter. Notebook records store only the position, so editing a name or number here updates every saved record. */
+/* sections of one class share the leading part of the name (7A, 7B -> 7) */
+const gradeOf = c => { c = String(c); const m = c.match(/^\D*\d+/); return m ? m[0] : c.replace(/[\s\-_]*[A-Za-z]$/, ""); };
+const sectionPeers = (cls, sub) => pairs().filter(p => p.sub === sub && p.cls !== cls && gradeOf(p.cls) === gradeOf(cls)).map(p => p.cls);
 const CQ = ["Notes", "Summary", "Question answers", "Book exercise", "Worksheet", "Word meanings", "Diagram", "Map work"];
 let CE = {}, chT = 0;
 function chLoad(c, o) {
@@ -751,7 +754,7 @@ function chDraw() {
    <p class="sub">${CE.tab ? `Chapters of ${esc(CE.tab)}: they show in notebooks and on the test screen while ${esc(CE.tab)} is the running term.` : "Chapters in “All terms” show in every term."} Notebooks check only chapters with something completed. Changing a name or number here also changes it in notebook records already saved. Add new chapters at the end.</p>
    <datalist id="bklist">${books.map(b => `<option value="${esc(b)}">`).join("")}</datalist>
    <div id="chl" class="chl">${rows.map(r => chRow(r.x, r.j)).join("") || `<p class="sub">No chapters here yet.</p>`}</div>
-   <p><button class="btn alt" data-a="chAdd">Add chapter</button></p><div class="row"><button class="btn" data-a="chSave" style="flex:2">Save syllabus</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
+   <p><button class="btn alt" data-a="chAdd">Add chapter</button> <button class="btn alt" data-a="chCopy">Copy to other sections</button></p><div class="row"><button class="btn" data-a="chSave" style="flex:2">Save syllabus</button><button class="btn alt" data-a="close">Cancel</button></div><div class="err" id="e2"></div>`);
   dirty = !!CE.dirty;
   const sh = $("sheet"), prev = sh.oninput; sh.oninput = e => { prev && prev(e); if (e.target.classList && e.target.classList.contains("cc")) { clearTimeout(chT); chT = setTimeout(() => chSync(e.target), 500); } };
 }
@@ -780,6 +783,22 @@ A.chAdd = () => {
   const r = [...document.querySelectorAll("#chl .cn")].pop(); if (r) r.focus();
 };
 A.chDel = b => { chCollect(); const x = CE.list[+b.closest(".chc").dataset.j]; if (x.o < 0 || CE.free) x.drop = true; else x.gone = true; CE.dirty = true; chDraw(); };
+A.chCopy = async () => {
+  if (CE.dirty) return toast("Save the syllabus first, then copy it.", true);
+  const live = N.ch.filter(c => c.st !== "gone"), peers = sectionPeers(N.cls, N.sub);
+  if (!live.length) return toast("There is nothing to copy yet.", true);
+  if (!peers.length) return toast(`No other section of class ${gradeOf(N.cls)} has ${N.sub} for you to edit.`, true);
+  await load(peers.map(c => P.syl(c, N.sub)));
+  sheetL(`<h2>Copy syllabus</h2><p class="sub">Copy the ${live.length} chapters of ${esc(N.cls)} ${esc(N.sub)} (books, numbers, terms, contents, remarks) to other sections of the same class. You can edit each copy afterwards.</p><div class="form">${peers.map(c => { const n = ((D[P.syl(c, N.sub)] || {}).chapters || []).filter(x => x.st !== "gone").length; return `<label class="cb"><input type="checkbox" class="cpx" value="${esc(c)}" ${n ? "" : "checked"}> ${esc(c)} <small class="sub">${n ? n + " chapters there now, will be replaced" : "no syllabus yet"}</small></label>`; }).join("")}<label class="cb"><input type="checkbox" id="cpd"> Also copy what is completed</label></div><p></p><div class="row"><button class="btn" data-a="chCopyGo" style="flex:2">Copy</button><button class="btn alt" data-a="close">Cancel</button></div>`);
+};
+A.chCopyGo = b => busy(b, async () => {
+  const to = [...document.querySelectorAll(".cpx:checked")].map(x => x.value), keep = $("cpd").checked; if (!to.length) return toast("Tick at least one section.", true);
+  const out = N.ch.filter(c => c.st !== "gone").map(c => { const o = JSON.parse(JSON.stringify(c)); if (!keep) { delete o.dn; delete o.cm; if (o.st !== "notcovered") o.st = "notstarted"; } return o; });
+  const has = to.filter(c => ((D[P.syl(c, N.sub)] || {}).chapters || []).some(x => x.st !== "gone"));
+  if (has.length && !confirm(`${has.join(", ")} already ${has.length === 1 ? "has" : "have"} a syllabus. Replace ${has.length === 1 ? "it" : "them"} with this copy?\n\nNotebook ticks already saved there stay on the same chapter positions, so they may now point to different chapters.`)) return;
+  to.forEach(c => patchQ(P.syl(c, N.sub), [{ k: "chapters", v: JSON.parse(JSON.stringify(out)) }], e => toast(`Not copied to ${c}: ` + e.message, true)));
+  closeSheet(true); toast("Syllabus copied to " + to.join(", ") + ". Open that section and tap Syllabus to edit it.");
+});
 A.chSave = b => busy(b, async () => {
   chCollect(); const out = [];
   CE.list.forEach(x => {
@@ -1370,45 +1389,69 @@ A.fPay = b => {
 const FEE_RESP = ["Already paid", "Will deposit until", "Special payment plan", "Will talk to MD sir"];
 const callKind = c => c.kind === "fee" ? "fee" : "fb";
 const callsOfKind = (cls, kind, sid) => callsOf(cls, sid).filter(c => callKind(c) === kind);
-const callTxt = c => (callKind(c) === "fee" ? "Fee call · " : "") + c.resp + (c.until ? " " + fmtD(c.until) : "");
+const FB_RESP = ["Good feedback", "Will visit", "Promised improvement"];
+const CALL_ST = ["Picked", "Not picked", "Not available", "Not reachable"];
+const callSt = c => c.st || (c.resp === "Not reachable" || c.resp === "Not available" ? c.resp : "Picked");       // older calls have no status of their own
+const callTxt = c => (callKind(c) === "fee" ? "Fee call · " : "Feedback · ") + (callSt(c) === "Picked" ? (c.st ? "Picked · " : "") + c.resp : callSt(c)) + (c.until ? " " + fmtD(c.until) : "");
+const NOCALL_DAYS = 10;
+let CS = { fb: true, fee: false };
 const grBadge = c => c.gr ? (c.grs ? ` <span class="pill ok">grievance resolved</span>` : ` <span class="pill bad">grievance open</span>`) : "";
 function cCall(host) {
-  const k = C.ck = C.ck || "fb", all = classStudents(C.cls), y = ayStart();
-  const todo = k === "fb" ? stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id, "fb")).map(r => ({ s: r.s, note: r.risk[0] }))
-    : all.filter(s => fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee")).map(s => ({ s, note: fyM(fyCalc(C.cls, y, s.id).owedM) + " due" }));
-  const cov = all.filter(s => calledThisWeek(C.cls, s.id, k)).length, open = callsOf(C.cls).filter(c => c.gr && !c.grs && stuById(c.sid));
-  host.innerHTML = `<div class="seg" id="cks"><button class="${k === "fb" ? "on" : ""}" data-a="cKind" data-k="fb">Feedback calls</button><button class="${k === "fee" ? "on" : ""}" data-a="cKind" data-k="fee">Fee calls</button></div>
-   ${open.length ? `<div class="card"><div class="row between"><b>Open grievances</b><span class="pill bad">${open.length}</span></div>${open.map(c => `<div class="lrow"><div class="lm"><b>${esc(stuById(c.sid).name)}</b><small>${fmtD(c.date)} · ${esc(c.gr)}</small></div><button class="btn alt sm" data-a="grRes" data-id="${esc(c.id)}">Resolve</button></div>`).join("")}</div>` : ""}
-   <div class="card"><b>Calls to make</b><p class="sub">${k === "fb" ? "Students with 2+ notebook chapters pending or low / falling marks, not called this week." : "Students whose fee months are pending, not called this week."}</p><div class="row chips">${todo.length ? todo.map(t => `<button class="chip bad" data-a="cPick" data-id="${esc(t.s.id)}">${esc(t.s.name)} <small>${esc(t.note)}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`}</div><p class="sub">${k === "fb" ? "Feedback" : "Fee"} calls this week: ${cov}/${all.length} parents called.</p></div>
+  const all = classStudents(C.cls), y = ayStart(), cut = ymd(new Date(Date.now() - NOCALL_DAYS * 864e5));
+  const risk = stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id, "fb")).map(r => ({ s: r.s, note: r.risk[0] })), rid = new Set(risk.map(t => t.s.id));
+  const stale = all.filter(s => !rid.has(s.id) && !callsOfKind(C.cls, "fb", s.id).some(c => c.date >= cut)).map(s => ({ s, d: (callsOfKind(C.cls, "fb", s.id)[0] || {}).date })).sort((a, z) => (a.d || "").localeCompare(z.d || "")).map(x => ({ s: x.s, note: x.d ? "last " + fmtD(x.d) : "never called" }));
+  const fee = all.filter(s => fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee")).map(s => ({ s, note: fyM(fyCalc(C.cls, y, s.id).owedM) + " due" }));
+  const chips = (L, k) => L.length ? L.map(t => `<button class="chip bad" data-a="cPick" data-k="${k}" data-id="${esc(t.s.id)}">${esc(t.s.name)} <small>${esc(t.note)}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`;
+  const cov = k => all.filter(s => calledThisWeek(C.cls, s.id, k)).length, open = callsOf(C.cls).filter(c => c.gr && !c.grs && stuById(c.sid));
+  host.innerHTML = `${open.length ? `<div class="card"><div class="row between"><b>Open grievances</b><span class="pill bad">${open.length}</span></div>${open.map(c => `<div class="lrow"><div class="lm"><b>${esc(stuById(c.sid).name)}</b><small>${fmtD(c.date)} · ${esc(c.gr)}</small></div><button class="btn alt sm" data-a="grRes" data-id="${esc(c.id)}">Resolve</button></div>`).join("")}</div>` : ""}
+   <div class="card"><b>Feedback calls to make</b><p class="sub">Students with 2+ notebook chapters pending or low / falling marks, not called this week.</p><div class="row chips">${chips(risk, "fb")}</div>
+    <p class="sub" style="margin-top:14px"><b>Parents not called in the last ${NOCALL_DAYS} days</b> (${stale.length})</p><div class="row chips">${chips(stale, "fb")}</div></div>
+   <div class="card"><b>Fee calls to make</b><p class="sub">Students whose fee months are pending, not called this week.</p><div class="row chips">${chips(fee, "fee")}</div>
+    <p class="sub">This week: feedback ${cov("fb")}/${all.length} · fee ${cov("fee")}/${all.length} parents called.</p></div>
    <div class="card"><div class="row mid"><label class="fl">Date for the calls you enter<input id="cdd" type="date" value="${C.callDate || today()}" data-c="cDate"></label><p class="sub" style="flex:2;margin:0;min-width:180px">Set it once: every call you log below uses this date.</p></div></div><div id="cent"></div><div id="clog"></div>`;
-  entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id, k), tail: s => { const c = callsOfKind(C.cls, k, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: callOpen });
+  entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id, "fb") || calledThisWeek(C.cls, s.id, "fee"), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: id => callOpen(id) });
   logDraw("calls");
-  const on = $("cks") && $("cks").querySelector(".on"); if (on && on.scrollIntoView) on.scrollIntoView({ block: "nearest", inline: "center" });
 }
-A.cKind = b => { C.ck = b.dataset.k; LG.calls = null; cCall($("cbody")); };
+A.cLf = b => { C.lf = b.dataset.k; if (LG.calls) LG.calls.n = 15; logDraw("calls"); };
 A.cDate = b => { C.callDate = b.value || today(); };
-A.cPick = b => callOpen(b.dataset.id);
-A.cRespCh = b => { const w = $("cuw"); if (w) w.classList.toggle("hide", b.value !== "Will deposit until"); };
-A.cGrCh = b => { $("cgt").classList.toggle("hide", !b.checked); const w = $("grsw"); if (w) w.classList.toggle("hide", !b.checked); };
-function callOpen(id) {
-  const k = C.ck || "fb", fee = k === "fee", s = stuById(id), h = callsOfKind(C.cls, k, id).slice(0, 3), y = ayStart(), fc = fyCalc(C.cls, y, id);
-  const r = fee ? null : stats(C.cls).rows.find(x => x.s.id === id), wk = new Date(Date.now() + 7 * 864e5);
-  sheet(`<h2>${esc(s.name)} <small>${fee ? "Fee call" : "Feedback call"}</small></h2>${fee ? (fc.r ? `<p>${pill(fyText(C.cls, y, id))} ${fc.owedM > 0 ? pill(fyM(fc.owedM) + " due", "bad") : ""}${fc.bal != null ? " " + pill("₹" + fc.bal + " yearly due") : ""}</p>` : `<p class="sub">No fee record for ${fyLab(y)} yet.</p>`) : (r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : "")}
-   ${h.length ? `<div class="hist">${h.map(c => `<div class="hr"><span>${esc(fmtD(c.date))} · ${esc(callTxt(c))}${c.r ? " · " + esc(c.r) : ""}</span></div>`).join("")}</div>` : ""}
-   <div class="form"><div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cr" data-c="cRespCh" aria-label="Parent's response">${(fee ? FEE_RESP : RESP).map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
-   ${fee ? `<div id="cuw" class="hide"><label>Will deposit until<input id="cu" type="date" value="${ymd(wk)}"></label></div>` : ""}
-   <input id="cn" placeholder="Remark (optional)">
-   ${fee ? "" : `<label class="cb"><input type="checkbox" id="cg" data-c="cGrCh"> Record a grievance</label><textarea id="cgt" class="hide" rows="3" placeholder="What is the parent's grievance?"></textarea>`}</div>
+A.cPick = b => callOpen(b.dataset.id, b.dataset.k);
+A.cRespCh = b => { if ($("cfee")) return cKApply(); const w = $("cuw"); if (w) w.classList.toggle("hide", b.value !== "Will deposit until"); };
+A.cEsCh = b => { const e = $("epk"); if (e) e.classList.toggle("hide", b.value !== "Picked"); };
+/* one call sheet for both kinds: tick Feedback, Fee or both; date and status are common */
+function callOpen(id, kind) {
+  const s = stuById(id), y = ayStart(), fc = fyCalc(C.cls, y, id), r = stats(C.cls).rows.find(x => x.s.id === id), wk = ymd(new Date(Date.now() + 7 * 864e5));
+  CS = kind ? { fb: kind === "fb", fee: kind === "fee" } : Object.assign({ fb: true, fee: false }, C.ks); if (kind) C.ks = Object.assign({}, CS);
+  const hist = k => { const h = callsOfKind(C.cls, k, id).slice(0, 3); return h.length ? `<div class="hist">${h.map(c => `<div class="hr"><span>${esc(fmtD(c.date))} · ${esc(callTxt(c).replace(/^(Fee call|Feedback) · /, ""))}${c.r ? " · " + esc(c.r) : ""}${grBadge(c)}</span></div>`).join("")}</div>` : `<p class="sub">No ${k === "fee" ? "fee" : "feedback"} calls yet.</p>`; };
+  sheet(`<h2>${esc(s.name)} <small>Parent call</small></h2>
+   <div class="row between ckrow"><b>Calling for</b><span class="row"><button type="button" class="chip" id="ckfb" data-a="cKT" data-k="fb">Feedback</button><button type="button" class="chip" id="ckfee" data-a="cKT" data-k="fee">Fee</button></span></div>
+   <div id="chfb" class="hide"><p class="sub" style="margin:8px 0 2px"><b>Feedback calls</b></p>${r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : ""}${hist("fb")}</div>
+   <div id="chfee" class="hide"><p class="sub" style="margin:8px 0 2px"><b>Fee calls</b></p>${fc.r ? `<p>${pill(fyText(C.cls, y, id))} ${fc.owedM > 0 ? pill(fyM(fc.owedM) + " due", "bad") : ""}${fc.bal != null ? " " + pill("₹" + fc.bal + " yearly due") : ""}</p>` : `<p class="sub">No fee record for ${fyLab(y)} yet.</p>`}${hist("fee")}</div>
+   <div class="form"><div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cs" data-c="cStCh" aria-label="Call status">${CALL_ST.map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
+    <div id="cfb" class="hide"><input id="cn" placeholder="Remarks for feedback (optional)"><div class="cpk"><select id="cr" aria-label="Feedback">${FB_RESP.map(x => `<option>${esc(x)}</option>`).join("")}</select><textarea id="cgt" rows="3" placeholder="Grievance (leave empty if none)" aria-label="Grievance"></textarea></div></div>
+    <div id="cfee" class="hide"><input id="cfn" placeholder="Remarks for fee (optional)"><div class="cpk"><select id="cfr" data-c="cRespCh" aria-label="Fee">${FEE_RESP.map(x => `<option>${esc(x)}</option>`).join("")}</select><div id="cuw" class="hide"><label>Will deposit until<input id="cu" type="date" value="${wk}"></label></div></div></div></div>
    <p></p><div class="row"><button class="btn" data-a="cSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="cSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
+  cKApply();
 }
+function cKApply() {
+  const pk = $("cs").value === "Picked";
+  [["fb", "ckfb"], ["fee", "ckfee"]].forEach(([k, id]) => { $(id).classList.toggle("on", !!CS[k]); $(id).setAttribute("aria-pressed", !!CS[k]); $("ch" + k).classList.toggle("hide", !CS[k]); $("c" + k).classList.toggle("hide", !CS[k]); });
+  document.querySelectorAll("#cfb .cpk, #cfee .cpk").forEach(e => e.classList.toggle("hide", !pk));          // the answers only apply when the parent picked up
+  $("cuw").classList.toggle("hide", !(pk && $("cfr").value === "Will deposit until"));
+}
+A.cKT = b => { CS[b.dataset.k] = !CS[b.dataset.k]; C.ks = Object.assign({}, CS); cKApply(); };
+A.cStCh = () => cKApply();
 A.cSkip = b => { if (!closeSheet()) return; const n = entryNext("c", b.dataset.id); if (n) callOpen(n.id); };
 A.cSave = b => {
-  const sid = b.dataset.id, fee = (C.ck || "fb") === "fee", resp = $("cr").value, v = { sid, date: $("cd").value, resp, r: $("cn").value.trim(), by: S.me.name, t: Date.now() };
-  if (!v.date) return $("e2").textContent = "Pick the call date.";
-  if (fee) { v.kind = "fee"; if (resp === "Will deposit until") { if (!$("cu").value) return $("e2").textContent = "Pick the date the parent will deposit by."; v.until = $("cu").value; } }
-  else if ($("cg").checked) { const g = $("cgt").value.trim(); if (!g) return $("e2").textContent = "Describe the grievance, or untick it."; v.gr = g; v.grs = 0; }
-  const cls = C.cls; patchQ(P.k("calls", cls), [{ k: "items." + uid("c"), v }], e => { toast("A call was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
-  dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true); toast(v.gr ? "Call and grievance logged" : "Call logged");
+  const sid = b.dataset.id, date = $("cd").value, st = $("cs").value, pk = st === "Picked", cls = C.cls, ops = [];
+  if (!CS.fb && !CS.fee) return $("e2").textContent = "Select Feedback, Fee or both.";
+  if (!date) return $("e2").textContent = "Pick the call date.";
+  const base = { sid, date, st, by: S.me.name, t: Date.now() }; let gr = false;
+  if (CS.fee && pk && $("cfr").value === "Will deposit until" && !$("cu").value) return $("e2").textContent = "Pick the date the parent will deposit by.";
+  if (CS.fb) { const v = Object.assign({}, base, { resp: pk ? $("cr").value : st, r: $("cn").value.trim() }), g = pk ? $("cgt").value.trim() : ""; if (g) { v.gr = g; v.grs = 0; gr = true; } ops.push({ k: "items." + uid("c"), v }); }
+  if (CS.fee) { const v = Object.assign({}, base, { kind: "fee", resp: pk ? $("cfr").value : st, r: $("cfn").value.trim() }); if (pk && v.resp === "Will deposit until") v.until = $("cu").value; ops.push({ k: "items." + uid("c"), v }); }
+  patchQ(P.k("calls", cls), ops, e => { toast("A call was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  dirty = false; cCall($("cbody")); const n = entryNext("c", sid); n ? callOpen(n.id) : closeSheet(true);
+  toast(gr ? "Call and grievance logged" : ops.length > 1 ? "Feedback and fee calls logged" : "Call logged");
 };
 /* grievances: mark resolved */
 A.grRes = b => {
@@ -1421,26 +1464,27 @@ A.grGo = b => {
   closeSheet(true); cCall($("cbody")); toast("Grievance marked resolved");
 };
 const callEditHTML = x => {
-  const fee = callKind(x) === "fee";
-  return `<div class="form"><div class="row"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"><select id="er" data-c="cRespCh" aria-label="Response">${(fee ? FEE_RESP : RESP).map(r => `<option ${r === x.resp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
-   ${fee ? `<div id="cuw" class="${x.resp === "Will deposit until" ? "" : "hide"}"><label>Will deposit until<input id="cu" type="date" value="${esc(x.until || "")}"></label></div>` : `<label class="cb"><input type="checkbox" id="cg" data-c="cGrCh" ${x.gr ? "checked" : ""}> Grievance</label><textarea id="cgt" rows="3" class="${x.gr ? "" : "hide"}" placeholder="Grievance">${esc(x.gr || "")}</textarea><label class="cb ${x.gr ? "" : "hide"}" id="grsw"><input type="checkbox" id="cgs" ${x.grs ? "checked" : ""}> Resolved</label>`}
-   <input id="en" placeholder="Remark" value="${esc(x.r || "")}"></div>`;
+  const fee = callKind(x) === "fee", st = callSt(x), pk = st === "Picked", opts = fee ? FEE_RESP : FB_RESP, list = pk && x.resp && !opts.includes(x.resp) ? [x.resp, ...opts] : opts;   // an older answer such as "Informed" stays selectable
+  return `<div class="form"><div class="row"><input id="ed" type="date" value="${esc(x.date)}" aria-label="Date"><select id="es" data-c="cEsCh" aria-label="Call status">${CALL_ST.map(r => `<option ${r === st ? "selected" : ""}>${esc(r)}</option>`).join("")}</select></div>
+   <div id="epk" class="${pk ? "" : "hide"}"><select id="er" data-c="cRespCh" aria-label="${fee ? "Fee" : "Feedback"}">${list.map(r => `<option ${r === x.resp ? "selected" : ""}>${esc(r)}</option>`).join("")}</select>
+   ${fee ? `<div id="cuw" class="${x.resp === "Will deposit until" ? "" : "hide"}"><label>Will deposit until<input id="cu" type="date" value="${esc(x.until || "")}"></label></div>` : `<textarea id="cgt" rows="3" placeholder="Grievance (leave empty if none)">${esc(x.gr || "")}</textarea><label class="cb"><input type="checkbox" id="cgs" ${x.grs ? "checked" : ""}> Grievance resolved</label>`}</div>
+   <input id="en" placeholder="Remarks" value="${esc(x.r || "")}"></div>`;
 };
 function callEditRead(rest) {
-  const fee = callKind(rest) === "fee", resp = $("er").value, v = Object.assign(rest, { date: $("ed").value, resp, r: $("en").value.trim(), t: Date.now() });
+  const fee = callKind(rest) === "fee", st = $("es").value, pk = st === "Picked", v = Object.assign(rest, { date: $("ed").value, st, resp: pk ? $("er").value : st, r: $("en").value.trim(), t: Date.now() });
   delete v.until;
-  if (fee) { if (resp === "Will deposit until") { if (!$("cu").value) return { err: "Pick the date the parent will deposit by." }; v.until = $("cu").value; } }
-  else { const on = $("cg").checked, g = $("cgt").value.trim(); if (on && !g) return { err: "Describe the grievance, or untick it." };
-    if (on) { v.gr = g; if ($("cgs").checked) { v.grs = 1; v.grd = v.grd || today(); } else { v.grs = 0; delete v.grd; delete v.grn; } } else { delete v.gr; delete v.grs; delete v.grd; delete v.grn; } }
+  if (fee) { if (pk && v.resp === "Will deposit until") { if (!$("cu").value) return { err: "Pick the date the parent will deposit by." }; v.until = $("cu").value; } }
+  else { const g = pk ? $("cgt").value.trim() : "";
+    if (g) { v.gr = g; if ($("cgs").checked) { v.grs = 1; v.grd = v.grd || today(); } else { v.grs = 0; delete v.grd; delete v.grn; } } else { delete v.gr; delete v.grs; delete v.grd; delete v.grn; } }
   return { v };
 }
 
 /* ----- log manager (calls + fines): edit, change dates and delete one or many ----- */
 let LG = {};
-const lgItems = k => (k === "calls" ? callsOfKind(C.cls, C.ck || "fb") : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date))).filter(x => stuById(x.sid));
+const lgItems = k => (k === "calls" ? callsOf(C.cls).filter(c => !C.lf || C.lf === "both" || callKind(c) === C.lf) : fineRows(C.cls).sort((a, b) => b.date.localeCompare(a.date))).filter(x => stuById(x.sid));
 function logDraw(k) {
   const host = $(k === "calls" ? "clog" : "flog"); if (!host) return; const L = LG[k] = LG[k] || { sel: new Set(), n: 15, q: "" };
-  host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? ((C.ck || "fb") === "fee" ? "Fee call log" : "Feedback call log") : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>
+  host.innerHTML = `<div class="card"><div class="row between"><b>${k === "calls" ? "Parent calls record" : "Fines & dues log"}</b><input id="lq-${k}" class="find" placeholder="Search name" value="${esc(L.q)}" aria-label="Search log"></div>${k === "calls" ? `<div class="seg" role="group" aria-label="Show calls">${[["both", "Both"], ["fb", "Feedback"], ["fee", "Fee"]].map(([a, v]) => `<button class="${(C.lf || "both") === a ? "on" : ""}" data-a="cLf" data-k="${a}">${v}</button>`).join("")}</div>` : ""}
    <div class="row tools"><button class="btn alt sm" data-a="lgAll" data-k="${k}">Select / clear all</button><button class="btn alt sm" data-a="lgDate" data-k="${k}">Change date</button>${k === "fines" ? `<button class="btn alt sm" data-a="lgPaid" data-k="fines">Mark paid</button>` : ""}<button class="btn alt sm" data-a="lgDel" data-k="${k}">Delete</button></div><small class="sub" id="lc-${k}"></small><div id="ll-${k}"></div></div>`;
   $("lq-" + k).oninput = e => { L.q = e.target.value.toLowerCase(); L.n = 15; logList(k); };
   logList(k);
@@ -1734,13 +1778,32 @@ function iStudent(host) {
   sDraw();
 }
 A.iSid = b => { I.sid = b.value; sDraw(); };
+/* the chosen subject: marks out of total in the tests of the selected period (same filters as the trend) */
+function subTests(sid) {
+  const sub = I.sub, mf = D[P.marks(I.cls, sub)] || {}, mk = mf.marks || {}, g = iRange();
+  const rows = Object.entries(mf.tests || {}).map(([tid, t]) => ({ t, e: (mk[tid] || {})[sid], ca: avg(Object.values(mk[tid] || {}).filter(numE).map(x => x.m / x.max * 100)) })).filter(r => r.e && ptOk({ term: !!r.t.term, x: r.t.name, date: r.t.date })).sort((a, z) => z.t.date.localeCompare(a.t.date));
+  const cell = e => e.ab ? "Absent" : e.g ? esc(e.g) : numE(e) ? `<b>${esc(e.m)}/${esc(e.max)}</b> <small class="sub">${r0(e.m / e.max * 100)}%</small>` : "–";
+  return `<div class="card"><div class="row between"><h3 style="margin:0">Recent tests · ${esc(sub)}</h3><small class="sub">${esc(KINDL[I.kind || "test"])}</small></div><p class="sub" style="margin:2px 0 6px">${esc(fmtFull(g.from))} – ${esc(fmtFull(g.to))}</p>${rows.slice(0, 30).map(r => `<div class="li"><span>${fmtD(r.t.date)} · ${esc(r.t.name)}${r.ca != null ? ` <small class="sub">class ${r0(r.ca)}%</small>` : ""}</span><span>${cell(r.e)}</span></div>`).join("") || `<p class="sub">No ${esc(KINDL[I.kind || "test"].toLowerCase())} for ${esc(sub)} in this period.</p>`}</div>`;
+}
+/* latest remark entered while checking this student's notebook, for every subject */
+function nbRemarks(sid) {
+  const rows = subjectsOf(I.cls).map(sub => {
+    const en = (D[P.nb(I.cls, sub)] || {}).entries || {}, ch = (D[P.syl(I.cls, sub)] || {}).chapters || [];
+    for (const d of Object.keys(en).filter(k => en[k][sid]).sort().reverse()) {
+      const e = en[d][sid], cr = Object.entries(e.cr || {}).filter(([i, t]) => t && ch[i]).map(([i, t]) => `${esc(chLbl(ch[i]))}: ${esc(t)}`);
+      if (e.r || cr.length) return { sub, d, txt: [e.r ? esc(e.r) : "", ...cr].filter(Boolean).join(" · ") };
+    }
+    return { sub };
+  });
+  return `<h4 class="nbh">Latest notebook remarks</h4>${rows.map(x => `<div class="nbrem"><b>${esc(x.sub)}</b>${x.d ? ` <small class="sub">${fmtD(x.d)}</small><p>${x.txt}</p>` : `<p class="sub">No remarks yet.</p>`}</div>`).join("")}`;
+}
 function sDraw() {
   const s = stuById(I.sid); if (!s) return $("sbody").innerHTML = noAccess("No students in this class yet.");
   if (I.sub && !subjectsOf(I.cls).includes(I.sub)) I.sub = ""; const st = stats(I.cls), me = st.rows.find(r => r.s.id === s.id), inch = inchargeClasses().includes(I.cls), cm = {};
   subjectsOf(I.cls).forEach(sub => cm[sub] = avg(st.rows.flatMap(r => r.sub[sub] || [])));
   let h = `<div class="card shead"><div class="av">${esc(s.name[0].toUpperCase())}</div><div><h2 style="margin:0">${esc(s.name)}</h2><p class="sub" style="margin:2px 0">Class ${esc(s.cls)} · average ${r0(me.avg)}${me.avg == null ? "" : "%"} (class ${r0(st.classAvg)}${st.classAvg == null ? "" : "%"})</p>${me.risk.map(x => pill(x, "bad")).join(" ")}</div></div>
-   <div class="card"><div class="row between"><h3 style="margin:0">Marks trend${I.sub ? " · " + esc(I.sub) : ""}${" · " + KINDL[I.kind || "test"]}</h3>${I.sub ? `<button class="link" data-a="iSub" data-s="">All subjects</button>` : ""}</div><div class="seg" role="group" aria-label="Marks type">${[["test", "Test marks"], ["unit", "Unit test exams"], ["term", "Term exams"], ["all", "All data"]].map(([k, v]) => `<button class="${(I.kind || "test") === k ? "on" : ""}" data-a="iKind" data-k="${k}">${v}</button>`).join("")}</div>${iRangeUI()}${lineChart(me.pts.filter(p => (!I.sub || p.sub === I.sub) && ptOk(p)).map(p => ({ x: (I.sub ? "" : p.sub + " ") + p.x, y: p.y })), { pass: S.cfg.passPercent })}<div class="subs">${subjectsOf(I.cls).map(sub => { const v = avg(me.pts.filter(p => p.sub === sub && ptOk(p)).map(p => p.y)), cv = avg(st.rows.flatMap(x => x.pts.filter(p => p.sub === sub && ptOk(p)).map(p => p.y))); return `<button class="sc${I.sub === sub ? " on" : ""}" data-a="iSub" data-s="${esc(sub)}" aria-pressed="${I.sub === sub}"><small>${esc(sub)}</small><b style="color:${tone(v)}">${r0(v)}${v == null ? "" : "%"}</b><small>class ${r0(cv)}${cv == null ? "" : "%"}</small></button>`; }).join("")}</div><p class="sub" style="margin-bottom:0">Tap a subject to see only its trend.</p></div>
-   <div class="card"><h3>Notebooks</h3>${subjectsOf(I.cls).map(sub => { const ch = (D[P.syl(I.cls, sub)] || {}).chapters || [], en = (D[P.nb(I.cls, sub)] || {}).entries || {}, d = Object.keys(en).filter(k => en[k][s.id]).sort().pop(), e = d && en[d][s.id]; return `<div class="nbrow"><b>${esc(sub)}</b><span class="hmr">${ch.map((c, i) => c.st === "gone" || !inSet(c, e ? e.tm || "" : termNow()) ? "" : `<i class="hc ${!e || !taught(c) ? "hn" : "s" + (e.s[i] || 0)}" title="${esc(c.n)}"></i>`).join("") || "<small class='sub'>No chapters set</small>"}</span><small>${e ? fmtD(d) : "no entry"}</small></div>`; }).join("")}</div>`;
+   <div class="card"><div class="row between"><h3 style="margin:0">Marks trend${I.sub ? " · " + esc(I.sub) : ""}${" · " + KINDL[I.kind || "test"]}</h3>${I.sub ? `<button class="link" data-a="iSub" data-s="">All subjects</button>` : ""}</div><div class="seg" role="group" aria-label="Marks type">${[["test", "Test marks"], ["unit", "Unit test exams"], ["term", "Term exams"], ["all", "All data"]].map(([k, v]) => `<button class="${(I.kind || "test") === k ? "on" : ""}" data-a="iKind" data-k="${k}">${v}</button>`).join("")}</div>${iRangeUI()}${lineChart(me.pts.filter(p => (!I.sub || p.sub === I.sub) && ptOk(p)).map(p => ({ x: (I.sub ? "" : p.sub + " ") + p.x, y: p.y })), { pass: S.cfg.passPercent })}<div class="subs">${subjectsOf(I.cls).map(sub => { const v = avg(me.pts.filter(p => p.sub === sub && ptOk(p)).map(p => p.y)), cv = avg(st.rows.flatMap(x => x.pts.filter(p => p.sub === sub && ptOk(p)).map(p => p.y))); return `<button class="sc${I.sub === sub ? " on" : ""}" data-a="iSub" data-s="${esc(sub)}" aria-pressed="${I.sub === sub}"><small>${esc(sub)}</small><b style="color:${tone(v)}">${r0(v)}${v == null ? "" : "%"}</b><small>class ${r0(cv)}${cv == null ? "" : "%"}</small></button>`; }).join("")}</div><p class="sub" style="margin-bottom:0">Tap a subject to see its trend and its recent marks.</p></div>${I.sub ? subTests(s.id) : ""}
+   <div class="card"><h3>Notebooks</h3>${subjectsOf(I.cls).map(sub => { const ch = (D[P.syl(I.cls, sub)] || {}).chapters || [], en = (D[P.nb(I.cls, sub)] || {}).entries || {}, d = Object.keys(en).filter(k => en[k][s.id]).sort().pop(), e = d && en[d][s.id]; return `<div class="nbrow"><b>${esc(sub)}</b><span class="hmr">${ch.map((c, i) => c.st === "gone" || !inSet(c, e ? e.tm || "" : termNow()) ? "" : `<i class="hc ${!e || !taught(c) ? "hn" : "s" + (e.s[i] || 0)}" title="${esc(c.n)}"></i>`).join("") || "<small class='sub'>No chapters set</small>"}</span><small>${e ? fmtD(d) : "no entry"}</small></div>`; }).join("")}${nbRemarks(s.id)}</div>`;
   if (inch) {
     const f = fineRows(I.cls, s.id).sort((a, b) => b.date.localeCompare(a.date)), cl = callsOf(I.cls, s.id);
     h += `<div class="grid2"><div class="card"><h3>Fines & dues</h3>${f.map(x => `<div class="li"><span>${fmtD(x.date)} · ${FTYPE[x.type]}</span><b>${rupee(x.amt)} ${x.paid ? "✓" : pill("due", "bad")}</b></div>`).join("") || `<p class="sub">None.</p>`}<div class="li"><span>Pending total</span><b>${rupee(fineDue(I.cls, s.id))}</b></div></div>
