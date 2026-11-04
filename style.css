@@ -458,3 +458,16 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 .sub.bk{margin:12px 0 4px;font-weight:800;color:var(--ink)}
 .cct.ok{background:var(--deep);color:#fff}.chip.dimc{opacity:.55}
 .tcb{margin-top:10px}.tcb .chips{margin:6px 0 4px}
+
+/* syllabus highlight: dark text on the light highlight in every theme */
+.sylr.hi,.sylr.hi b,.sylr.hi small,.sylr.hi .sub{color:#0b3d3d}
+.sylr.hi .cct{background:#ffffffd9;color:#0b3d3d}.sylr.hi .cct.ok{background:#0b4a4a;color:#fff}
+/* sheets: slim pill scrollbar in the theme accent, kept clear of the rounded corners */
+.sheet::-webkit-scrollbar{width:16px}
+.sheet::-webkit-scrollbar-track{background:transparent;margin:30px 0}
+.sheet::-webkit-scrollbar-thumb{background:var(--deep);border-radius:999px;border:5px solid transparent;background-clip:padding-box;min-height:56px}
+.sheet::-webkit-scrollbar-thumb:hover{background:var(--green);background-clip:padding-box}
+@supports not selector(::-webkit-scrollbar){.sheet{scrollbar-width:thin;scrollbar-color:var(--deep) transparent}}
+/* calls + insights */
+.ckrow .chip{min-height:40px}.cpk{display:flex;flex-direction:column;gap:10px;margin-top:10px}.cpk>select{width:100%}
+.nbrem{padding:8px 0;border-top:1px solid var(--line)}.nbrem p{margin:2px 0 0}.nbh{margin:16px 0 2px}
