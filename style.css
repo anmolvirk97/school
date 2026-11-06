@@ -471,3 +471,23 @@ html.boot[data-fx=new] .side .sky .kcl{animation:cloudIn 1.4s cubic-bezier(.22,1
 /* calls + insights */
 .ckrow .chip{min-height:40px}.cpk{display:flex;flex-direction:column;gap:10px;margin-top:10px}.cpk>select{width:100%}
 .nbrem{padding:8px 0;border-top:1px solid var(--line)}.nbrem p{margin:2px 0 0}.nbh{margin:16px 0 2px}
+
+/* syllabus change review */
+.ixi{padding:10px 0;border-top:1px solid var(--line)}.ixi p{margin:4px 0 0;font-size:14px;color:var(--mut)}
+/* school scene: rises with the scroll, clouds drift, flag waves */
+html[data-fx=new] .side .sky .rise{transition:transform .35s ease-out}
+html[data-fx=new] .side .sky .r1{transform:translateY(calc((1 - var(--sp,1)) * 46px))}
+html[data-fx=new] .side .sky .r2{transform:translateY(calc((1 - var(--sp,1)) * 30px))}
+html[data-fx=new] .side .sky .r3{transform:translateY(calc((1 - var(--sp,1)) * 24px))}
+html[data-fx=new] .side .sky .kcl{transform:translateX(calc(var(--sp,1) * 34px))}
+html[data-fx=new] .side .sky .kcl2{transform:translateX(calc(var(--sp,1) * -26px))}
+html[data-fx=new] .side .sky .kcl3{transform:translateX(calc(var(--sp,1) * 18px))}
+html[data-fx=new] .side .sky .kcl,html[data-fx=new] .side .sky .kcl2,html[data-fx=new] .side .sky .kcl3{transition:transform .5s ease-out}
+html[data-fx=new] .side .sky .drift{animation:skyDrift 15s ease-in-out infinite alternate}
+html[data-fx=new] .side .sky .d2{animation-duration:21s;animation-direction:alternate-reverse}
+html[data-fx=new] .side .sky .d3{animation-duration:26s}
+html[data-fx=new] .side .sky .fl{animation:flagWave 1.15s ease-in-out infinite;animation-delay:calc(var(--k) * -.17s)}
+html[data-fx=new] .side .sky .ksun{animation:sunPulse 5s ease-in-out infinite}
+@keyframes skyDrift{from{transform:translateX(-14px)}to{transform:translateX(24px)}}
+@keyframes flagWave{0%,100%{transform:translateY(calc(var(--k) * -.5px))}50%{transform:translateY(calc(var(--k) * .5px))}}
+@keyframes sunPulse{0%,100%{opacity:.82}50%{opacity:1}}
