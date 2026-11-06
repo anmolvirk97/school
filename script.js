@@ -469,7 +469,7 @@ A.mStart = b => busy(b, async () => {
 async function mRun(host, c, s, tid, quiet, local) {
   const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
-  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], t.term || termNow(), t.ch, t.chi); } catch { }
+  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], SYL_TERMS.includes(t.term) ? t.term : termNow(), t.ch, t.chi); } catch { }
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
   rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}${t.rm ? " · " + esc(t.rm) : ""}${syl}`,
@@ -643,12 +643,13 @@ let N = {}, NS = {};
 const ne = sid => getAt(D[N.ep] || {}, ["entries", N.date, sid]);
 const nbPaths = (c, s) => ({ sp: `data/syllabus/${c}_${s}.json`, ep: `data/notebook/${c}_${s}.json` });
 /* ----- terms: the term in force is the profile's own choice, else the school's, else the first term ----- */
-const schoolTerm = () => { const T = S.cfg.terms || []; return T.includes(S.cfg.curTerm) ? S.cfg.curTerm : T[0] || ""; };
-const termNow = () => (S.me && (S.cfg.terms || []).includes(S.me.term)) ? S.me.term : schoolTerm();
+const SYL_TERMS = ["Term 1", "Term 2"];          // the syllabus has two terms; exam names (Unit Test, Half Yearly ...) stay in the exam settings and the Term exams screen
+const schoolTerm = () => SYL_TERMS.includes(S.cfg.curTerm) ? S.cfg.curTerm : SYL_TERMS[0];
+const termNow = () => (S.me && SYL_TERMS.includes(S.me.term)) ? S.me.term : schoolTerm();
 /* A chapter with no term belongs to every term. A notebook entry remembers the term it was saved under (e.tm);
    older entries have none and see only the term-less chapters, so nothing saved earlier changes. Chapter positions never move
    (a removed chapter stays as st:"gone"), so the ticks of every entry always stay on the right chapter. */
-const inSet = (c, tm) => !c.tm || c.tm === tm;
+const inSet = (c, tm) => !c.tm || !SYL_TERMS.includes(c.tm) || c.tm === tm;      // a chapter tagged with an old exam name counts as "all terms"
 const chFor = (ch, tm) => ch.map((c, i) => ({ c, i })).filter(x => x.c.st !== "gone" && inSet(x.c, tm));
 /* a chapter shows the number typed in the syllabus (its position in the term if none was typed); renaming or renumbering it there
    changes it everywhere at once, because saved notebook records only remember the chapter's place, never its name */
@@ -670,7 +671,7 @@ function sylHTML(ch, tm, hi, chi) {
 V.nb = host => {
   setTitle("Notebooks", "One tap per chapter: done, partial, pending.");
   if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("n")}<input id="ndate" type="date" value="${today()}" aria-label="Date"></div>${(S.cfg.terms || []).length ? `<div class="row"><select id="nterm" data-c="nTermCh" aria-label="Term">${S.cfg.terms.map(t => `<option ${t === termNow() ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>` : ""}<p></p><div class="row"><button class="btn" data-a="nOpen">Open</button><button class="btn alt" data-a="nChapters">Syllabus</button></div></div><div id="nbody"></div>`;
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("n")}<input id="ndate" type="date" value="${today()}" aria-label="Date"></div>${SYL_TERMS.length ? `<div class="row"><select id="nterm" data-c="nTermCh" aria-label="Term">${SYL_TERMS.map(t => `<option ${t === termNow() ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>` : ""}<p></p><div class="row"><button class="btn" data-a="nOpen">Open</button><button class="btn alt" data-a="nChapters">Syllabus</button></div></div><div id="nbody"></div>`;
   fillPair("n");
 };
 async function nbLoad() {
@@ -725,7 +726,7 @@ const sectionPeers = (cls, sub) => pairs().filter(p => p.sub === sub && p.cls !=
 const CQ = ["Notes", "Summary", "Question answers", "Book exercise", "Worksheet", "Word meanings", "Diagram", "Map work"];
 let CE = {}, chT = 0;
 function chLoad(c, o) {
-  const x = { o, b: c.b || "", no: c.no || "", n: c.n || "", tm: c.tm || "", c: (c.c || []).slice(), dn: (c.dn || []).slice(), cm: !!c.cm, nc: c.st === "notcovered", r: c.r || "", gone: c.st === "gone" };
+  const x = { o, b: c.b || "", no: c.no || "", n: c.n || "", tm: SYL_TERMS.includes(c.tm) ? c.tm : "", c: (c.c || []).slice(), dn: (c.dn || []).slice(), cm: !!c.cm, nc: c.st === "notcovered", r: c.r || "", gone: c.st === "gone" };
   if (c.st === "full" && !c.dn && !c.cm) x.cm = true;                                   // chapters saved before "completed" existed
   if (c.st === "summary" && !c.dn && !c.cm) { if (!x.c.some(t => /summary/i.test(t))) x.c.push("Summary"); x.dn = x.c.filter(t => /summary/i.test(t)); }
   return x;
@@ -733,14 +734,16 @@ function chLoad(c, o) {
 A.nChapters = async b => {
   if (!await nbLoad()) return;
   const en = (D[N.ep] || {}).entries || {};
-  CE = { list: N.ch.map(chLoad), tab: N.term || "", free: !Object.keys(en).some(d => Object.keys(en[d] || {}).length), dirty: false };
+  await load([P.marks(N.cls, N.sub)]);
+  const tChi = Object.values((D[P.marks(N.cls, N.sub)] || {}).tests || {}).some(t => (t.chi || []).length);
+  CE = { list: N.ch.map(chLoad), orig: JSON.parse(JSON.stringify(N.ch)), tab: N.term || "", free: !tChi && !Object.keys(en).some(d => Object.keys(en[d] || {}).length), dirty: false };
   chDraw();
 };
 const chShown = x => !x.gone && !x.drop;
 const chDn = (x, j) => `<div class="cdn" data-j="${j}"><small class="sub">Completed</small><div class="row chips">
   <button type="button" class="chip${!x.cm && !x.nc && !x.dn.length ? " on" : ""}" data-a="chDn" data-k="none" data-j="${j}">Not started</button>${x.c.map(t => `<button type="button" class="chip${x.cm || x.dn.includes(t) ? " on" : ""}" data-a="chDn" data-k="c" data-t="${esc(t)}" data-j="${j}">${esc(t)}</button>`).join("")}<button type="button" class="chip${x.cm ? " on" : ""}" data-a="chDn" data-k="all" data-j="${j}">Entire chapter</button><button type="button" class="chip${x.nc ? " on" : ""}" data-a="chDn" data-k="nc" data-j="${j}">Not covered</button></div></div>`;
 function chRow(x, j) {
-  const T = S.cfg.terms || [];
+  const T = SYL_TERMS;
   return `<div class="crow chc" data-j="${j}"><div class="chtop"><input class="cbk" list="bklist" value="${esc(x.b)}" placeholder="Book, e.g. Literature / Grammar (optional)" aria-label="Book name"><button class="link" data-a="chDel" aria-label="Remove chapter">✕</button></div>
    <div class="chtop"><input class="cno" value="${esc(x.no)}" placeholder="No." maxlength="6" aria-label="Chapter number"><input class="cn" value="${esc(x.n)}" placeholder="Chapter name" aria-label="Chapter name"></div>
    <div class="chmid"><select class="ct" data-c="chTm" aria-label="Term"><option value="" ${x.tm ? "" : "selected"}>All terms</option>${T.map(t => `<option ${x.tm === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></div>
@@ -749,7 +752,7 @@ function chRow(x, j) {
    ${chDn(x, j)}<input class="crm" value="${esc(x.r)}" placeholder="Remarks (optional)" aria-label="Chapter remarks"></div>`;
 }
 function chDraw() {
-  const T = S.cfg.terms || [], tabs = [["", "All terms"], ...T.map(t => [t, t])], rows = CE.list.map((x, j) => ({ x, j })).filter(r => chShown(r.x) && r.x.tm === CE.tab), books = [...new Set(CE.list.filter(chShown).map(x => x.b).filter(Boolean))];
+  const T = SYL_TERMS, tabs = [["", "All terms"], ...T.map(t => [t, t])], rows = CE.list.map((x, j) => ({ x, j })).filter(r => chShown(r.x) && r.x.tm === CE.tab), books = [...new Set(CE.list.filter(chShown).map(x => x.b).filter(Boolean))];
   sheet(`<h2>Syllabus: ${esc(N.cls)} ${esc(N.sub)}</h2><div class="seg wrap" role="tablist" aria-label="Term">${tabs.map(([k, v]) => `<button class="${CE.tab === k ? "on" : ""}" data-a="chTab" data-t="${esc(k)}">${esc(v)} (${CE.list.filter(q => chShown(q) && q.tm === k).length})</button>`).join("")}</div>
    <p class="sub">${CE.tab ? `Chapters of ${esc(CE.tab)}: they show in notebooks and on the test screen while ${esc(CE.tab)} is the running term.` : "Chapters in “All terms” show in every term."} Notebooks check only chapters with something completed. Changing a name or number here also changes it in notebook records already saved. Add new chapters at the end.</p>
    <datalist id="bklist">${books.map(b => `<option value="${esc(b)}">`).join("")}</datalist>
@@ -799,18 +802,59 @@ A.chCopyGo = b => busy(b, async () => {
   to.forEach(c => patchQ(P.syl(c, N.sub), [{ k: "chapters", v: JSON.parse(JSON.stringify(out)) }], e => toast(`Not copied to ${c}: ` + e.message, true)));
   closeSheet(true); toast("Syllabus copied to " + to.join(", ") + ". Open that section and tap Syllabus to edit it.");
 });
-A.chSave = b => busy(b, async () => {
-  chCollect(); const out = [];
+/* what do saved notebook records and tests hold for each chapter that is being changed? Warn, and offer ways out. */
+async function chImpacts() {
+  const [mf] = await load([P.marks(N.cls, N.sub)]), tests = Object.entries((mf && mf.tests) || {}).map(([tid, t]) => Object.assign({ tid }, t)), en = (D[N.ep] || {}).entries || {}, items = [];
+  CE.orig.forEach((was, o) => {
+    const x = CE.list[o]; if (!x || was.st === "gone") return;
+    const gone = !!(x.gone || x.drop), newSt = x.nc ? "notcovered" : x.cm ? "full" : x.dn.length ? "summary" : "notstarted", nb = [];
+    Object.keys(en).forEach(d => Object.entries(en[d] || {}).forEach(([sid, e]) => { if ((e.s && e.s[o] > 0) || (e.cr && e.cr[o])) nb.push({ d, tm: e.tm || "" }); }));
+    const tr = tests.filter(t => (t.chi || []).includes(o) || (!t.chi && t.ch === was.n)); if (!nb.length && !tr.length) return;
+    const dates = new Set(nb.map(r => r.d)).size, used = `${nb.length} notebook ${nb.length === 1 ? "entry" : "entries"} (${dates} ${dates === 1 ? "date" : "dates"}) and ${tr.length} ${tr.length === 1 ? "test" : "tests"}`, it = { o, lab: chLbl(was), msgs: [] };
+    if (gone) it.msgs.push(`Removed. ${used} refer to it. It is hidden, not erased: saved ticks and marks stay safe, but it stops counting. Instead of removing it you can set it to “Not covered” (still visible, not checked).`);
+    else {
+      const from = was.tm || "", to = x.tm;
+      if (from !== to) { const old = nb.filter(r => r.tm === from).length; it.move = { from, to }; it.msgs.push(`Moved from ${from || "All terms"} to ${to || "All terms"}. ${old} notebook ${old === 1 ? "entry" : "entries"} saved under ${from || "All terms"} would stop showing and counting it. Safer: keep the original where it is and add the changed chapter as a new one in ${to || "All terms"}.`); }
+      const ch = []; if (x.n !== was.n) ch.push("name"); if ((x.no || "") !== (was.no || "")) ch.push("number"); if ((x.b || "") !== (was.b || "")) ch.push("book");
+      if (ch.length) { it.msgs.push(`Changed ${ch.join(" and ")}. Notebook records follow automatically (they remember only the chapter’s place).${tr.length ? ` ${tr.length} saved ${tr.length === 1 ? "test keeps" : "tests keep"} the old name in ${tr.length === 1 ? "its" : "their"} title unless you update ${tr.length === 1 ? "it" : "them"} below.` : ""}`); if (x.n !== was.n && tr.length) it.rename = { from: was.n, to: x.n, tests: tr }; }
+      if (taught(was) && !taught({ st: newSt })) it.msgs.push(`Completed status removed. ${nb.length} notebook ${nb.length === 1 ? "entry keeps its" : "entries keep their"} ticks, but the chapter stops counting in percentages, heatmaps and reports. Marking it completed again brings everything back.`);
+      (was.c || []).filter(t => !x.c.includes(t)).forEach(t => { const n = tr.filter(q => (q.tp || []).some(p => p === t || p.endsWith(": " + t))).length; if (n) it.msgs.push(`Content “${t}” removed, and ${n} saved ${n === 1 ? "test was" : "tests were"} set on it. ${n === 1 ? "The test keeps" : "The tests keep"} the title.`); });
+    }
+    if (it.msgs.length) items.push(it);
+  });
+  return items;
+}
+function chReview(imp) {
+  CE.imp = imp; const nT = imp.filter(i => i.rename).reduce((n, i) => n + i.rename.tests.length, 0), mv = imp.some(i => i.move);
+  sheetL(`<h2>Saved records use these chapters</h2><p class="sub">Your changes touch chapters that notebook records or tests already refer to. Nothing is lost either way; check what happens to each one.</p>${imp.map(it => `<div class="ixi"><b>${esc(it.lab)}</b>${it.msgs.map(m => `<p>${esc(m)}</p>`).join("")}</div>`).join("")}
+   ${nT || mv ? `<p class="sub"><b>Choose what to do</b></p><div class="form">${mv ? `<label class="cb"><input type="checkbox" id="ixC" checked> Keep each moved chapter in its old term and add the changed one as a new chapter in the new term</label>` : ""}${nT ? `<label class="cb"><input type="checkbox" id="ixT" checked> Also update the chapter name in the ${nT} saved ${nT === 1 ? "test" : "tests"}</label>` : ""}</div>` : ""}
+   <p></p><div class="row"><button class="btn" data-a="chGo" style="flex:2">Save changes</button><button class="btn alt" data-a="chBack">Back to editing</button></div>`);
+}
+A.chBack = () => chDraw();
+A.chGo = b => busy(b, async () => {
+  const imp = CE.imp || [], o = { tests: [] };
+  if ($("ixC") && $("ixC").checked) imp.filter(it => it.move).forEach(it => { const x = CE.list[it.o]; CE.list.push(Object.assign({}, x, { o: -1, c: x.c.slice(), dn: x.dn.slice() })); CE.list[it.o] = chLoad(CE.orig[it.o], it.o); it.copied = true; });
+  if ($("ixT") && $("ixT").checked) imp.filter(it => it.rename && !it.copied).forEach(it => it.rename.tests.forEach(t => { o.tests.push({ k: `tests.${t.tid}.name`, v: String(t.name || "").split(it.rename.from).join(it.rename.to) }); if (t.ch === it.rename.from) o.tests.push({ k: `tests.${t.tid}.ch`, v: it.rename.to }); }));
+  chCommit(o);
+});
+function chCommit(o) {
+  const out = [];
   CE.list.forEach(x => {
     if (x.drop) return;
     if (x.gone || (!x.n && x.o >= 0)) { if (!CE.free) out.push({ n: x.n || "(removed)", st: "gone" }); return; }      // keep its place unless nothing was ever entered
     if (!x.n) return;
-    const o = { n: x.n, st: x.nc ? "notcovered" : x.cm ? "full" : x.dn.length ? "summary" : "notstarted" };       // st is what notebooks look at: anything completed = checked
-    if (x.b) o.b = x.b; if (x.no) o.no = x.no; if (x.tm) o.tm = x.tm; if (x.c.length) o.c = x.c; if (x.cm) o.cm = 1; else if (x.dn.length) o.dn = x.dn; if (x.r) o.r = x.r; out.push(o);
+    const q = { n: x.n, st: x.nc ? "notcovered" : x.cm ? "full" : x.dn.length ? "summary" : "notstarted" };       // st is what notebooks look at: anything completed = checked
+    if (x.b) q.b = x.b; if (x.no) q.no = x.no; if (x.tm) q.tm = x.tm; if (x.c.length) q.c = x.c; if (x.cm) q.cm = 1; else if (x.dn.length) q.dn = x.dn; if (x.r) q.r = x.r; out.push(q);
   });
-  if (!out.some(c => c.st !== "gone")) return $("e2").textContent = "Add at least one chapter.";
   patchQ(N.sp, [{ k: "chapters", v: out }], e => { toast("The syllabus was not saved: " + e.message, true); });
+  if (o.tests && o.tests.length) patchQ(P.marks(N.cls, N.sub), o.tests, e => toast("Test names were not updated: " + e.message, true));
   N.ch = out; closeSheet(true); toast("Syllabus saved"); nbDraw();
+}
+A.chSave = b => busy(b, async () => {
+  chCollect();
+  if (!CE.list.some(x => !x.drop && !x.gone && x.n)) return $("e2").textContent = "Add at least one chapter.";
+  const imp = await chImpacts(); if (imp.length) return chReview(imp);
+  chCommit({});
 });
 function nOpenStu(id) {
   const e = ne(id), tm = e ? e.tm || "" : N.term; NS = { id, tm, vis: chFor(N.ch, tm), st: N.ch.map((c, i) => e ? (e.s[i] || 0) : 0), cr: Object.assign({}, e && e.cr), r: e ? e.r || "" : "", detail: NS.detail || false, rem: false };
@@ -1392,26 +1436,64 @@ const callsOfKind = (cls, kind, sid) => callsOf(cls, sid).filter(c => callKind(c
 const FB_RESP = ["Good feedback", "Will visit", "Promised improvement"];
 const CALL_ST = ["Picked", "Not picked", "Not available", "Not reachable"];
 const callSt = c => c.st || (c.resp === "Not reachable" || c.resp === "Not available" ? c.resp : "Picked");       // older calls have no status of their own
-const callTxt = c => (callKind(c) === "fee" ? "Fee call · " : "Feedback · ") + (callSt(c) === "Picked" ? (c.st ? "Picked · " : "") + c.resp : callSt(c)) + (c.until ? " " + fmtD(c.until) : "");
+const callTxt = c => (callKind(c) === "fee" ? "Fee call · " : "Feedback · ") + (callSt(c) === "Picked" ? (c.st ? "Picked · " : "") + c.resp : callSt(c)) + (c.until ? " " + fmtD(c.until) : "") + (c.pr === "paid" ? " ✔ paid" + (c.pa ? " " + rupee(c.pa) : "") : c.pr === "part" ? " · part paid " + rupee(c.pa) : c.pr === "again" ? " · missed, call again" : "");
 const NOCALL_DAYS = 10;
 let CS = { fb: true, fee: false };
 const grBadge = c => c.gr ? (c.grs ? ` <span class="pill ok">grievance resolved</span>` : ` <span class="pill bad">grievance open</span>`) : "";
 function cCall(host) {
-  const all = classStudents(C.cls), y = ayStart(), cut = ymd(new Date(Date.now() - NOCALL_DAYS * 864e5));
+  const all = classStudents(C.cls), y = ayStart(), T = today(), cut = ymd(new Date(Date.now() - NOCALL_DAYS * 864e5));
   const risk = stats(C.cls).rows.filter(r => r.risk.length && !calledThisWeek(C.cls, r.s.id, "fb")).map(r => ({ s: r.s, note: r.risk[0] })), rid = new Set(risk.map(t => t.s.id));
   const stale = all.filter(s => !rid.has(s.id) && !callsOfKind(C.cls, "fb", s.id).some(c => c.date >= cut)).map(s => ({ s, d: (callsOfKind(C.cls, "fb", s.id)[0] || {}).date })).sort((a, z) => (a.d || "").localeCompare(z.d || "")).map(x => ({ s: x.s, note: x.d ? "last " + fmtD(x.d) : "never called" }));
-  const fee = all.filter(s => fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee")).map(s => ({ s, note: fyM(fyCalc(C.cls, y, s.id).owedM) + " due" }));
+  /* fee: the latest fee call of a student decides where they sit */
+  const plan = [], prom = [], tocall = [];
+  all.forEach(s => {
+    const c = callsOfKind(C.cls, "fee", s.id)[0];
+    if (c && c.resp === "Special payment plan") { plan.push({ s, c }); return; }
+    const pr = c && c.resp === "Will deposit until" && c.until && !c.pr ? c : null; if (pr) prom.push({ s, c: pr });
+    if (fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee") && !(pr && pr.until >= T)) tocall.push({ s, note: pr ? "promised " + fmtD(pr.until) + ", not confirmed" : fyM(fyCalc(C.cls, y, s.id).owedM) + " due" });
+  });
+  prom.sort((a, z) => a.c.until.localeCompare(z.c.until));
   const chips = (L, k) => L.length ? L.map(t => `<button class="chip bad" data-a="cPick" data-k="${k}" data-id="${esc(t.s.id)}">${esc(t.s.name)} <small>${esc(t.note)}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`;
   const cov = k => all.filter(s => calledThisWeek(C.cls, s.id, k)).length, open = callsOf(C.cls).filter(c => c.gr && !c.grs && stuById(c.sid));
+  const ft = C.ft || "call", ftabs = [["call", "To call", tocall.length], ["prom", "Promised", prom.length], ["plan", "Payment plan", plan.length]];
+  const dd = u => Math.round((new Date(u) - new Date(T)) / 864e5), duePill = u => { const d = dd(u); return d < 0 ? pill(`date passed ${-d} ${-d === 1 ? "day" : "days"} ago`, "bad") : d === 0 ? pill("due today", "bad") : pill(`in ${d} ${d === 1 ? "day" : "days"}`); };
+  const feeBody = ft === "call" ? `<p class="sub">Students whose fee months are pending and who were not called this week. Students who promised a date, or are on a payment plan, are in their own tabs.</p><div class="row chips">${chips(tocall, "fee")}</div>`
+    : ft === "prom" ? `<p class="sub">Parents who promised to pay on a date. When the date comes, mark it paid, enter the amount received, or call again.</p>${prom.map(x => `<div class="lrow"><div class="lm"><b>${esc(x.s.name)}</b><small>Promised to pay on ${esc(fmtD(x.c.until))} · called ${esc(fmtD(x.c.date))}${x.c.r ? " · " + esc(x.c.r) : ""}</small><span>${duePill(x.c.until)}</span></div><button class="btn alt sm" data-a="prUpd" data-id="${esc(x.c.id)}">Update</button></div>`).join("") || `<p class="sub">No promised payments waiting.</p>`}`
+    : `<p class="sub">Students marked “Special payment plan” in their latest fee call.</p>${plan.map(x => { const fc = fyCalc(C.cls, y, x.s.id); return `<div class="lrow"><div class="lm"><b>${esc(x.s.name)}</b><small>On plan since ${esc(fmtD(x.c.date))}${x.c.r ? " · " + esc(x.c.r) : ""}${fc.r && fc.owedM > 0 ? " · " + esc(fyM(fc.owedM)) + " due" : ""}</small></div><button class="btn alt sm" data-a="cPick" data-k="fee" data-id="${esc(x.s.id)}">Call</button></div>`; }).join("") || `<p class="sub">Nobody is on a special payment plan.</p>`}`;
   host.innerHTML = `${open.length ? `<div class="card"><div class="row between"><b>Open grievances</b><span class="pill bad">${open.length}</span></div>${open.map(c => `<div class="lrow"><div class="lm"><b>${esc(stuById(c.sid).name)}</b><small>${fmtD(c.date)} · ${esc(c.gr)}</small></div><button class="btn alt sm" data-a="grRes" data-id="${esc(c.id)}">Resolve</button></div>`).join("")}</div>` : ""}
    <div class="card"><b>Feedback calls to make</b><p class="sub">Students with 2+ notebook chapters pending or low / falling marks, not called this week.</p><div class="row chips">${chips(risk, "fb")}</div>
     <p class="sub" style="margin-top:14px"><b>Parents not called in the last ${NOCALL_DAYS} days</b> (${stale.length})</p><div class="row chips">${chips(stale, "fb")}</div></div>
-   <div class="card"><b>Fee calls to make</b><p class="sub">Students whose fee months are pending, not called this week.</p><div class="row chips">${chips(fee, "fee")}</div>
+   <div class="card"><b>Fee calls</b><div class="seg" role="tablist" aria-label="Fee calls" style="margin:8px 0 10px">${ftabs.map(([k, v, n]) => `<button class="${ft === k ? "on" : ""}" data-a="cFt" data-k="${k}">${v} (${n})</button>`).join("")}</div>${feeBody}
     <p class="sub">This week: feedback ${cov("fb")}/${all.length} · fee ${cov("fee")}/${all.length} parents called.</p></div>
    <div class="card"><div class="row mid"><label class="fl">Date for the calls you enter<input id="cdd" type="date" value="${C.callDate || today()}" data-c="cDate"></label><p class="sub" style="flex:2;margin:0;min-width:180px">Set it once: every call you log below uses this date.</p></div></div><div id="cent"></div><div id="clog"></div>`;
   entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id, "fb") || calledThisWeek(C.cls, s.id, "fee"), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: id => callOpen(id) });
   logDraw("calls");
 }
+A.cFt = b => { C.ft = b.dataset.k; cCall($("cbody")); };
+/* a promised payment: paid / part paid (the amount goes into the fee record too) / not paid, call again */
+function feeAddPay(cls, sid, a, d) {
+  const y = ayStart(), r = fyRec(cls, y, sid) || { months: {} }, pays = [...(r.pays || []), { d, a }].sort((p, q) => (p.d || "").localeCompare(q.d || "")), paid = Math.round(pays.reduce((n, q) => n + q.a, 0) * 100) / 100;
+  if (r.total > 0 && paid > r.total) return { err: `That would be more than the yearly total of ${rupee(r.total)}.` };
+  return { op: { k: `${fyKey(y)}.${sid}`, v: Object.assign({}, r, { pays, paid, by: S.me.name, t: Date.now() }) } };
+}
+A.prUpd = b => {
+  const c = callsOf(C.cls).find(x => x.id === b.dataset.id); if (!c) return; const s = stuById(c.sid), fc = fyCalc(C.cls, ayStart(), c.sid);
+  sheet(`<h2>${esc(s.name)} <small>Promised payment</small></h2><p class="sub">Promised to pay on <b>${esc(fmtD(c.until))}</b>${c.r ? " · " + esc(c.r) : ""}.${fc.bal != null ? ` Yearly balance ${esc(rupee(fc.bal))}.` : ""}</p>
+   <div class="form"><label>Amount received (₹)<input id="pra" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional for “Paid”"></label><label>Received on<input id="prd" type="date" value="${today()}"></label><input id="prn" placeholder="Note (optional)"></div>
+   <p class="sub">An amount entered here is also added to the student's fee record. Set the paid months under Fees if needed.</p>
+   <div class="row"><button class="btn" data-a="prGo" data-k="paid" data-id="${esc(c.id)}">Paid</button><button class="btn alt" data-a="prGo" data-k="part" data-id="${esc(c.id)}">Part paid</button></div><p></p><button class="btn alt" data-a="prGo" data-k="again" data-id="${esc(c.id)}">Not paid: call again</button><div class="err" id="e2"></div>`);
+};
+A.prGo = b => {
+  const id = b.dataset.id, k = b.dataset.k, cls = C.cls, c = callsOf(cls).find(x => x.id === id); if (!c) return;
+  const amt = Math.round((+$("pra").value || 0) * 100) / 100, d = $("prd").value || today(), note = $("prn").value.trim(), err = $("e2");
+  if (k === "part" && !(amt > 0)) return err.textContent = "Enter the amount received for a part payment.";
+  if (k !== "again" && d > today()) return err.textContent = "The received date cannot be in the future.";
+  let feeOp = null; if (k !== "again" && amt > 0) { const r = feeAddPay(cls, c.sid, amt, d); if (r.err) return err.textContent = r.err; feeOp = r.op; }
+  const ops = [{ k: `items.${id}.pr`, v: k }, { k: `items.${id}.prd`, v: k === "again" ? today() : d }, { k: `items.${id}.pa`, v: k === "again" ? null : amt || null }, { k: `items.${id}.prn`, v: note || null }, { k: `items.${id}.prb`, v: S.me.name }];
+  patchQ(P.k("calls", cls), ops, e => { toast("Not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  if (feeOp) patchQ(P.k("fees", cls), [feeOp], e => toast("The payment was not added to the fee record: " + e.message, true));
+  closeSheet(true); cCall($("cbody")); toast(k === "again" ? "Moved back to calls to make" : k === "part" ? "Part payment saved" : "Marked paid");
+};
 A.cLf = b => { C.lf = b.dataset.k; if (LG.calls) LG.calls.n = 15; logDraw("calls"); };
 A.cDate = b => { C.callDate = b.value || today(); };
 A.cPick = b => callOpen(b.dataset.id, b.dataset.k);
@@ -1936,7 +2018,7 @@ A.sBulkGo = b => busy(b, async () => {
 async function adSettings(host) {
   const c = S.cfg;
   host.innerHTML = `<div class="card" id="shcard"><h3>Google Sheets backup</h3><p class="sub" id="shst">Checking…</p><div class="row"><button class="btn alt" data-a="shTest">Test connection</button><button class="btn" data-a="shSync">Sync all data now</button></div><div class="sub" id="shlog" role="status"></div></div>
-   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Default subjects (each class starts with these; the class incharge can change their own class under My class → Subjects)<input id="cu" value="${esc(c.subjects.join(", "))}"></label><div id="cuo" class="sorter">${subSortHTML(c.subjects)}</div><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Term running now (whole school; a teacher can choose their own under Profile)<select id="ccut">${c.terms.map(t => `<option ${t === schoolTerm() ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label><label>Exam grades, best to lowest (for grade-only subjects)<input id="cgr" value="${esc(gradeList().join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
+   <div class="card"><h3>School logo</h3><p class="sub">Printed on mark sheets, report cards and reports.</p><div class="sgprev">${S.logo ? `<img src="${S.logo}" alt="Logo" style="max-height:90px">` : `<small>No logo saved yet.</small>`}</div><div class="row"><button class="btn alt sm" data-a="logoUp">Upload logo</button>${S.logo ? `<button class="btn alt sm" data-a="logoDel">Remove</button>` : ""}</div></div><div class="card"><h3>School settings</h3><div class="form"><label>School name<input id="cs" value="${esc(c.school)}"></label><label>Classes (comma separated, letters/digits)<input id="cc" value="${esc(c.classes.join(", "))}"></label><label>Default subjects (each class starts with these; the class incharge can change their own class under My class → Subjects)<input id="cu" value="${esc(c.subjects.join(", "))}"></label><div id="cuo" class="sorter">${subSortHTML(c.subjects)}</div><label>Monitor categories<input id="cm" value="${esc(c.monitorCategories.join(", "))}"></label><label>Signatories for mark sheets &amp; report cards<input id="cg" value="${esc(sigList().join(", "))}"></label><label>Exam terms (e.g. Term 1, Term 2)<input id="ct" value="${esc(c.terms.join(", "))}"></label><label>Syllabus term running now (Term 1 / Term 2, whole school; a teacher can choose their own under Profile)<select id="ccut">${SYL_TERMS.map(t => `<option ${t === schoolTerm() ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label><label>Exam grades, best to lowest (for grade-only subjects)<input id="cgr" value="${esc(gradeList().join(", "))}"></label><label>Non-English fine (₹)<input id="cf" type="number" value="${c.nonEnglishFine}"></label><label>Pass mark (%)<input id="cp" type="number" value="${c.passPercent}"></label></div><p></p><button class="btn" data-a="cfgSave">Save settings</button><div class="err" id="e2"></div></div><div class="card"><h3>Recent admin activity</h3><div id="aud" class="sub">Loading…</div></div>`;
   shStatus();
   try { const l = (await api("GET", "/admin/audit")).log.slice(0, 12); $("aud").innerHTML = l.map(x => `<div class="li"><span>${esc(x.who)} ${esc(x.what)}</span><small>${new Date(x.at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}</small></div>`).join("") || "Nothing yet."; } catch { $("aud").textContent = ""; }
 }
@@ -2485,7 +2567,7 @@ A.gStu = b => { $("gq").value = ""; $("gres").innerHTML = ""; studentPage(b.data
 /* ----- profile: avatar, name, username + role, theme, signature screen, PIN ----- */
 A.profile = () => sheet(`<div class="pf"><div class="av">${esc(S.me.name[0].toUpperCase())}</div><h2>${esc(S.me.name)}</h2><p class="sub">@${esc(S.me.username)} · ${esc(roleLine())}</p></div>
   <div class="plist"><button class="prow2" data-a="theme"><span>${ic("moon", 18)}</span><b>Visuals</b>${ic("chevr", 18)}</button><button class="prow2" data-a="sigScreen"><span>${ic("pen", 18)}</span><b>${S.sig ? "Edit signature" : "Add signature"}</b>${S.sig ? `<img class="sgthumb" src="${S.sig}" alt="">` : ""}${ic("chevr", 18)}</button><button class="prow2" data-a="sessInfo"><span>${ic("lock", 18)}</span><b>Recent logins</b>${ic("chevr", 18)}</button></div>
-  ${(S.cfg.terms || []).length ? `<h3 style="margin-top:18px">Current term</h3><div class="form"><label>Notebook chapters and test screens use<select data-c="myTerm"><option value="" ${S.me.term ? "" : "selected"}>Same as the school (${esc(schoolTerm())})</option>${S.cfg.terms.map(t => `<option ${S.me.term === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label></div>` : ""}<h3 style="margin-top:18px">Auto sign-out</h3><div class="form"><label>Sign out after being inactive for<select data-c="idleSet" ${KEEP ? "disabled" : ""}>${IDLE_OPTS.map(m => `<option value="${m}" ${idleMin() === m ? "selected" : ""}>${m === 1 ? "1 minute" : m + " minutes"}</option>`).join("")}</select></label><button type="button" class="prow2" data-a="keepTog"><span>${ic("lock", 18)}</span><b>${KEEP ? "Stay signed in is ON · tap to turn off" : "Keep me signed in (lock)"}</b></button></div>
+  ${SYL_TERMS.length ? `<h3 style="margin-top:18px">Current term</h3><div class="form"><label>Notebook chapters and test screens use<select data-c="myTerm"><option value="" ${S.me.term ? "" : "selected"}>Same as the school (${esc(schoolTerm())})</option>${SYL_TERMS.map(t => `<option ${S.me.term === t ? "selected" : ""}>${esc(t)}</option>`).join("")}</select></label></div>` : ""}<h3 style="margin-top:18px">Auto sign-out</h3><div class="form"><label>Sign out after being inactive for<select data-c="idleSet" ${KEEP ? "disabled" : ""}>${IDLE_OPTS.map(m => `<option value="${m}" ${idleMin() === m ? "selected" : ""}>${m === 1 ? "1 minute" : m + " minutes"}</option>`).join("")}</select></label><button type="button" class="prow2" data-a="keepTog"><span>${ic("lock", 18)}</span><b>${KEEP ? "Stay signed in is ON · tap to turn off" : "Keep me signed in (lock)"}</b></button></div>
   <h3 style="margin-top:18px">Change PIN</h3><div class="form"><input id="op" type="password" inputmode="numeric" maxlength="6" placeholder="Current PIN" aria-label="Current PIN" autocomplete="current-password"><input id="np" type="password" inputmode="numeric" maxlength="6" placeholder="New PIN (4–6 digits)" aria-label="New PIN" autocomplete="new-password"><input id="np2" type="password" inputmode="numeric" maxlength="6" placeholder="Repeat new PIN" aria-label="Repeat new PIN" autocomplete="new-password"></div>
   <p></p><div class="row"><button class="btn" data-a="pinSave" style="flex:2">Save new PIN</button><button class="btn alt" data-a="logout">Log out</button></div><div class="err" id="e2"></div>`);
 A.myTerm = async b => { const v = b.value; try { await api("POST", "/me/term", { term: v }); S.me.term = v; toast("Running term: " + termNow()); } catch (x) { toast(x.message, true); } };
@@ -2494,13 +2576,30 @@ A.pinSave = b => busy(b, async () => { if ($("np").value !== $("np2").value) ret
 
 /* ----- right panel (profile + this week's monitors over the school skyline) ----- */
 const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8a7a"/><stop offset="1" stop-color="#0b4a4a"/></linearGradient></defs>
- <circle class="ksun" cx="238" cy="52" r="20" fill="#dfe97a" opacity=".9"/><g class="kcl" fill="#fff" opacity=".35"><ellipse cx="60" cy="40" rx="30" ry="7"/><ellipse cx="90" cy="48" rx="22" ry="6"/></g>
+ <g class="rise r3"><circle class="ksun" cx="238" cy="52" r="20" fill="#dfe97a" opacity=".9"/></g>
+ <g class="kcl" fill="#fff" opacity=".35"><g class="drift d1"><ellipse cx="60" cy="40" rx="30" ry="7"/><ellipse cx="90" cy="48" rx="22" ry="6"/></g></g>
+ <g class="kcl2" fill="#fff" opacity=".26"><g class="drift d2"><ellipse cx="196" cy="28" rx="24" ry="6"/><ellipse cx="218" cy="34" rx="16" ry="5"/></g></g>
+ <g class="kcl3" fill="#fff" opacity=".2"><g class="drift d3"><ellipse cx="128" cy="66" rx="20" ry="4.5"/></g></g>
+ <g class="rise r1"><g class="ksch"><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><g class="kflag" fill="#e2574c">${[0, 1, 2, 3, 4, 5, 6].map(k => `<rect class="fl" style="--k:${k}" x="${(150 + k * 3.1).toFixed(1)}" y="${88 + k}" width="3.3" height="${14 - k * 2}"/>`).join("")}</g>
+ ${[104, 124, 166, 186].map(x => `<rect x="${x}" y="164" width="14" height="18" rx="2" fill="#2d8a7a"/>`).join("")}<rect x="140" y="186" width="20" height="26" rx="3" fill="#0b4a4a"/>${[78, 206].map(x => `<rect x="${x}" y="182" width="14" height="14" rx="2" fill="#2d8a7a"/>`).join("")}</g></g>
+ <g class="rise r2"><g class="ktr"><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></g>
  <rect x="0" y="212" width="300" height="38" fill="url(#gw)"/>
- <g><path d="M0 212 Q40 188 90 206 T190 204 T300 196 V214 H0z" fill="#5bb98c"/><path d="M0 220 Q70 204 150 218 T300 212 V232 H0z" fill="#2d8a7a" opacity=".8"/></g>
- <g class="ksch"><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><polygon points="150,88 170,95 150,102" fill="#e2574c"/>
- ${[104, 124, 166, 186].map(x => `<rect x="${x}" y="164" width="14" height="18" rx="2" fill="#2d8a7a"/>`).join("")}<rect x="140" y="186" width="20" height="26" rx="3" fill="#0b4a4a"/>${[78, 206].map(x => `<rect x="${x}" y="182" width="14" height="14" rx="2" fill="#2d8a7a"/>`).join("")}</g>
- <g class="ktr"><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></svg>`;
+ <g><path d="M0 212 Q40 188 90 206 T190 204 T300 196 V214 H0z" fill="#5bb98c"/><path d="M0 220 Q70 204 150 218 T300 212 V232 H0z" fill="#2d8a7a" opacity=".8"/></g></svg>`;
 const CREDIT = `<div class="credit"><img src="logo.svg" alt="" width="24" height="24" decoding="async"><span>Designed by <b>Anmol Virk</b></span></div>`;
+/* the school scene follows the page: it rises with the scroll, clouds drift, the flag waves.
+   --sp (0..1) is the scroll progress: the whole page on desktop (the panel stays in view), or how much of the panel has come into view on a phone (where it sits at the bottom). */
+(() => {
+  let q = 0;
+  const upd = () => {
+    q = 0; const sd = $("side"); if (!sd) return; let p = 1;
+    if (fxOn()) { if (getComputedStyle(sd).position === "sticky") { const max = document.documentElement.scrollHeight - innerHeight; p = max > 40 ? scrollY / max : 1; } else { const r = sd.getBoundingClientRect(); p = (innerHeight - r.top) / Math.max(1, Math.min(r.height, innerHeight)); } }
+    sd.style.setProperty("--sp", Math.min(1, Math.max(0, p)).toFixed(3));
+  };
+  const kick = () => { if (!q) q = requestAnimationFrame(upd); };
+  addEventListener("scroll", kick, { passive: true }); addEventListener("resize", kick);
+  if (window.ResizeObserver) new ResizeObserver(kick).observe(document.body);
+  kick();
+})();
 function renderSide() {
   const cls = myClasses().includes(H.cls) ? H.cls : myClasses()[0];
   const sideH = `<div class="sp"><div class="av big2">${esc(S.me.name[0].toUpperCase())}</div><b>${esc(S.me.name)}</b><small>${esc(roleLine())}</small><button class="btn pillbtn" data-a="profile">${ic("edit", 16)} Edit profile</button>
