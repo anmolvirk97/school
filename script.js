@@ -1481,9 +1481,9 @@ A.prUpd = b => {
   sheet(`<h2>${esc(s.name)} <small>Promised payment</small></h2><p class="sub">Promised to pay on <b>${esc(fmtD(c.until))}</b>${c.r ? " · " + esc(c.r) : ""}.${fc.bal != null ? ` Yearly balance ${esc(rupee(fc.bal))}.` : ""}</p>
    <div class="form"><label>Amount received (₹)<input id="pra" type="number" inputmode="decimal" min="0" step="any" placeholder="Optional for “Paid”"></label><label>Received on<input id="prd" type="date" value="${today()}"></label><input id="prn" placeholder="Note (optional)"></div>
    <p class="sub">An amount entered here is also added to the student's fee record. Set the paid months under Fees if needed.</p>
-   <div class="row"><button class="btn" data-a="prGo" data-k="paid" data-id="${esc(c.id)}">Paid</button><button class="btn alt" data-a="prGo" data-k="part" data-id="${esc(c.id)}">Part paid</button></div><p></p><button class="btn alt" data-a="prGo" data-k="again" data-id="${esc(c.id)}">Not paid: call again</button><div class="err" id="e2"></div>`);
+   <div class="row"><button class="btn" data-a="prPayGo" data-k="paid" data-id="${esc(c.id)}">Paid</button><button class="btn alt" data-a="prPayGo" data-k="part" data-id="${esc(c.id)}">Part paid</button></div><p></p><button class="btn alt" data-a="prPayGo" data-k="again" data-id="${esc(c.id)}">Not paid: call again</button><div class="err" id="e2"></div>`);
 };
-A.prGo = b => {
+A.prPayGo = b => {
   const id = b.dataset.id, k = b.dataset.k, cls = C.cls, c = callsOf(cls).find(x => x.id === id); if (!c) return;
   const amt = Math.round((+$("pra").value || 0) * 100) / 100, d = $("prd").value || today(), note = $("prn").value.trim(), err = $("e2");
   if (k === "part" && !(amt > 0)) return err.textContent = "Enter the amount received for a part payment.";
