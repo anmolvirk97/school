@@ -1115,7 +1115,7 @@ A.tCardsGo = () => {
 };
 
 /* ===== reports for the principal (PDF): notebooks, marks, calls, class record, fines, attendance ===== */
-const PR = { per: "week", cls: "" };
+const PR = { per: "week", cls: "", sel: {} };
 const ymd = d => new Date(d - d.getTimezoneOffset() * 6e4).toISOString().slice(0, 10);
 const dAdd = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 const fmtFull = d => d ? new Date(d + "T00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) : "";
@@ -1134,28 +1134,35 @@ function prHTML() {
    <div class="form"><label>Class<select id="prc" data-c="prCls" aria-label="Class"></select></label></div>
    <div class="seg" id="prper">${Object.entries(PRPER).map(([k, v]) => `<button data-a="prPer" data-p="${k}" class="${PR.per === k ? "on" : ""}">${v}</button>`).join("")}</div><div id="prr"></div>
    <div class="xsets" id="prcats"></div>
+   <h4 style="margin:12px 0 4px">Subjects for notebook &amp; marks records</h4><div class="xsets" id="prsubs"></div>
    <div class="row"><select id="pror" aria-label="Page"><option value="portrait">Portrait A4</option><option value="landscape">Landscape A4</option></select></div>
    <label class="cb" style="margin-top:10px"><input type="checkbox" id="prbr" checked> Start each record on a new page</label>
    <p></p><button class="btn" data-a="prGo">${ic("print", 18)} Print / save PDF</button><div class="err" id="prerr" role="alert"></div></div>`;
 }
 function prInit() {
   const cs = myClasses(); if (!$("prc")) return; if (!cs.includes(PR.cls)) PR.cls = cs.includes(I.cls) ? I.cls : cs[0];
-  $("prc").innerHTML = cs.map(c => `<option ${c === PR.cls ? "selected" : ""}>${esc(c)}</option>`).join(""); prCats(); prRangeUI();
+  $("prc").innerHTML = cs.map(c => `<option ${c === PR.cls ? "selected" : ""}>${esc(c)}</option>`).join(""); prCats(); prSubs(); prRangeUI();
 }
+function prSubs() {
+  const el = $("prsubs"); if (!el) return; const all = subjectsOf(PR.cls), sel = PR.sel[PR.cls] || all;
+  el.innerHTML = all.length ? all.map(x => `<label class="cb"><input type="checkbox" data-c="prSub" value="${esc(x)}" ${sel.includes(x) ? "checked" : ""}> ${esc(x)}</label>`).join("") : `<p class="sub">No subjects assigned for this class.</p>`;
+}
+A.prSub = () => { PR.sel[PR.cls] = [...document.querySelectorAll("#prsubs input:checked")].map(i => i.value); };
 function prCats() {
   const inch = inchargeClasses().includes(PR.cls), all = [["nb", "Notebook record"], ["mk", "Marks record (tests)"], ["cl", "Parent calls record", 1], ["cr", "Class record (summary per student)", 1], ["fi", "Fines & dues", 1], ["at", "Attendance", 1]];
   $("prcats").innerHTML = all.filter(x => !x[2] || inch).map(([k, v]) => `<label class="cb"><input type="checkbox" value="${k}" ${["nb", "mk", "cl"].includes(k) ? "checked" : ""}> ${v}</label>`).join("");
 }
 function prRangeUI() { $("prr").innerHTML = PR.per === "range" ? `<div class="row"><label class="fl">From<input id="prf" type="date" value="${today()}"></label><label class="fl">To<input id="prt" type="date" value="${today()}"></label></div>` : `<p class="sub">${esc(fmtFull(prRange().from))} – ${esc(fmtFull(prRange().to))} (weeks run Monday to Sunday)</p>`; }
-A.prCls = b => { PR.cls = b.value; prCats(); };
+A.prCls = b => { PR.cls = b.value; prCats(); prSubs(); };
 A.prPer = b => { PR.per = b.dataset.p; document.querySelectorAll("#prper button").forEach(x => x.classList.toggle("on", x === b)); prRangeUI(); };
 
 A.prGo = b => busy(b, async () => {
   $("prerr").textContent = "";
   try {
-    const c = PR.cls, inch = inchargeClasses().includes(c), subs = subjectsOf(c), rg = prRange(), cats = [...document.querySelectorAll("#prcats input:checked")].map(i => i.value);
+    const c = PR.cls, inch = inchargeClasses().includes(c), allSubs = subjectsOf(c), chosen = [...document.querySelectorAll("#prsubs input:checked")].map(i => i.value), subs = allSubs.filter(x => chosen.includes(x)), rg = prRange(), cats = [...document.querySelectorAll("#prcats input:checked")].map(i => i.value);
     if (!cats.length) throw new Error("Tick at least one record.");
-    await load([...subs.flatMap(s => [P.marks(c, s), P.nb(c, s), P.syl(c, s)]), ...(inch ? ["fines", "calls", "fees", "attendance"].map(k => P.k(k, c)) : [])], true);
+    if ((cats.includes("nb") || cats.includes("mk")) && !subs.length) throw new Error("Tick at least one subject for the notebook / marks records.");
+    await load([...allSubs.flatMap(s => [P.marks(c, s), P.nb(c, s), P.syl(c, s)]), ...(inch ? ["fines", "calls", "fees", "attendance"].map(k => P.k(k, c)) : [])], true);
     const inR = d => !!d && d >= rg.from && d <= rg.to, stu = classStudents(c), pass = S.cfg.passPercent, sec = [];
     const tbl = (head, rows, cls = "") => `<table class="pt ${cls}"><thead><tr>${head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${head.length}">Nothing recorded in this period.</td></tr>`}</tbody></table>`;
     const tr = cells => `<tr>${cells.map(x => `<td>${x}</td>`).join("")}</tr>`;
@@ -1190,7 +1197,7 @@ A.prGo = b => busy(b, async () => {
     if (inch && cats.includes("cr")) {
       const months = Object.keys(FD("attendance", c)).filter(m => /^\d{4}-\d{2}$/.test(m) && m + "-01" <= rg.to && m + "-31" >= rg.from), y = ayStart(rg.to), callsIn = callsOf(c).filter(x => inR(x.date));
       const rows = stu.map(s => {
-        const pts = [], nbp = []; subs.forEach(sub => { mkTests(sub).forEach(x => { const e = x.ms[s.id]; if (numE(e)) pts.push(e.m / e.max * 100); }); const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, l = nbLatest(sub, s.id); if (l.e && nbTot(l.e, ch)) nbp.push(nbDone(l.e, ch) / nbTot(l.e, ch) * 100); });
+        const pts = [], nbp = []; allSubs.forEach(sub => { mkTests(sub).forEach(x => { const e = x.ms[s.id]; if (numE(e)) pts.push(e.m / e.max * 100); }); const ch = (D[P.syl(c, sub)] || {}).chapters || [], tc = ch.filter(taught).length, l = nbLatest(sub, s.id); if (l.e && nbTot(l.e, ch)) nbp.push(nbDone(l.e, ch) / nbTot(l.e, ch) * 100); });
         let a = 0, lv = 0, any = false; months.forEach(m => { const r = getAt(FD("attendance", c), [m, s.id]); if (r) { any = true; a += r.a || 0; lv += r.l || 0; } });
         const fc = fyCalc(c, y, s.id), fd = fineDue(c, s.id);
         return { cells: [esc(s.name), pts.length, pts.length ? `<b>${Math.round(avg(pts))}%</b>` : "—", nbp.length ? Math.round(avg(nbp)) + "%" : "—", callsIn.filter(x => x.sid === s.id).length, fd ? rupee(fd) : "—", any ? `${a} / ${lv}` : "—", fc.r ? (fc.owedM > 0 ? `<span class="fail">${fyM(fc.owedM)}</span>` : "Up to date") : "—"], avg: pts.length ? avg(pts) : null };
