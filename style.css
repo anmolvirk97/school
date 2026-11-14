@@ -491,3 +491,18 @@ html[data-fx=new] .side .sky .ksun{animation:sunPulse 5s ease-in-out infinite}
 @keyframes skyDrift{from{transform:translateX(-14px)}to{transform:translateX(24px)}}
 @keyframes flagWave{0%,100%{transform:translateY(calc(var(--k) * -.5px))}50%{transform:translateY(calc(var(--k) * .5px))}}
 @keyframes sunPulse{0%,100%{opacity:.82}50%{opacity:1}}
+
+/* ---- fast data entry: quick marks grid, notebook grid, roll tags ---- */
+.rn{color:var(--mut);font-weight:800;font-size:.85em}
+.gr{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--line)}
+.gr .gn{flex:1;min-width:0;font-weight:700;overflow-wrap:anywhere;line-height:1.2}
+.gr .gm{width:88px;flex:none;text-align:center;font-weight:800;font-size:20px;min-height:48px}
+.gr small{flex:none;color:var(--mut);font-weight:800;min-width:42px}
+.gr.ok .gm{border-color:var(--green)}
+.gr.bad .gm{border-color:var(--red);background:color-mix(in srgb,var(--red) 14%,transparent)}
+.ngrid{border-collapse:separate;border-spacing:0;font-size:14px}
+.ngrid th,.ngrid td{padding:3px;text-align:center}
+.ngrid th:first-child,.ngrid td:first-child{position:sticky;left:0;z-index:1;background:var(--card);text-align:left;white-space:nowrap;padding-right:10px;max-width:46vw;overflow:hidden;text-overflow:ellipsis}
+.gc{width:42px;height:42px;min-height:42px;border-radius:11px;padding:0;font-weight:800;font-size:17px}
+.gc.g_{background:var(--bg);color:var(--mut)}
+.chip.sm{min-height:36px;padding:6px 12px;font-size:13px}
