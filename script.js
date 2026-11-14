@@ -255,7 +255,7 @@ function navPaint() {
 }
 addEventListener("resize", () => { clearTimeout(navPaint.t); navPaint.t = setTimeout(navPaint, 120); });
 
-function sheet(html) { const s = $("sheet"), opening = s.classList.contains("hide"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); if (opening) { const fresh = FXSRC && FXSRC.t > FXCLOSE; if (Date.now() - FXCLOSE < 700 && !fresh) { document.querySelectorAll(".fxs").forEach(x => x.remove()); } else queueMicrotask(() => fxOpen(s)); } dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) setTimeout(() => { try { f.focus({ preventScroll: true }); } catch { } }, 240); }
+function sheet(html) { const s = $("sheet"), opening = s.classList.contains("hide"); $("veil").classList.remove("hide"); s.classList.remove("hide"); s.innerHTML = html; s.insertAdjacentHTML("afterbegin", `<button type="button" class="xclose" data-a="close" aria-label="Close"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>`); if (opening) { const fresh = FXSRC && FXSRC.t > FXCLOSE; if (Date.now() - FXCLOSE < 700 && !fresh) { document.querySelectorAll(".fxs").forEach(x => x.remove()); } else queueMicrotask(() => fxOpen(s)); } dirty = false; s.oninput = () => dirty = true; const f = s.querySelector("[autofocus]"); if (f) { const go = () => { try { f.focus({ preventScroll: true }); } catch { } }; opening ? setTimeout(go, 240) : go(); } }
 const sheetL = h => { sheet(h); $("sheet").oninput = null; };
 function closeSheet(force) { if (dirty && !force && !confirm("Discard what you typed for this entry?")) return false; fxSheetOut(); $("veil").classList.add("hide"); FXCLOSE = Date.now(); $("sheet").classList.add("hide"); $("sheet").classList.remove("wide"); $("sheet").innerHTML = ""; dirty = false; return true; }
 $("veil").onclick = () => closeSheet();
@@ -292,28 +292,35 @@ const noAccess = what => `<div class="card empty"><b>Nothing to show yet</b><p c
 
 /* ---------- universal alphabet entry (used by marks, notebooks, fines, calls, fees) ---------- */
 const ENT = {};
+let ESORT = (() => { try { return localStorage.esort === "roll" ? "roll" : "name"; } catch { return "name"; } })();
+const entStudents = c => { const l = classStudents(c); return ESORT === "roll" ? l.slice().sort((a, b) => (parseFloat(a.roll) || 1e9) - (parseFloat(b.roll) || 1e9) || byName(a, b)) : l; };
+const rollTag = s => s.roll ? `<small class="rn">${esc(s.roll)}.</small> ` : "";
+A.eSort = () => { ESORT = ESORT === "roll" ? "name" : "roll"; try { localStorage.esort = ESORT; } catch { } Object.keys(ENT).forEach(id => { if ($(id + "-ls")) entryDraw(id); }); if ($("mgrid")) mGridDraw(); };
 function entry(host, o) {      // o: {id, cls, done(s), tail(s), pick(sid), counter=true, note}
   if (FXSRC && FXSRC.grow && Date.now() - FXSRC.t < 6000) fxCardOut(host);       // the card being replaced leaves with an exit animation
   ENT[o.id] = Object.assign({ letter: "", q: "", counter: true }, o);
-  host.innerHTML = `<div class="card entry"><div class="row between"><b id="${o.id}-cnt" class="cnt"></b><input id="${o.id}-q" class="find" placeholder="Search name" aria-label="Search student"></div>
+  host.innerHTML = `<div class="card entry"><div class="row between"><b id="${o.id}-cnt" class="cnt"></b><input id="${o.id}-q" class="find" placeholder="Search name or roll" aria-label="Search student"><button type="button" class="chip sm" id="${o.id}-so" data-a="eSort"></button></div>
    <div class="bar"><i id="${o.id}-bar"></i></div>${o.note ? `<div class="notes">${o.note}</div>` : ""}${o.tools ? `<div class="row tools">${o.tools}</div>` : ""}
    <div class="eflow"><div class="alpha" id="${o.id}-al" role="group" aria-label="Jump to letter"></div><div id="${o.id}-ls" class="elist"></div></div></div>`;
   $(o.id + "-q").oninput = e => { ENT[o.id].q = e.target.value.toLowerCase(); entryDraw(o.id); };
+  $(o.id + "-q").onkeydown = e => { if (e.key !== "Enter") return; const x = ENT[o.id]; if (x.q && x.list && x.list.length) { e.preventDefault(); x.pick(x.list[0].id); } };
   entryDraw(o.id);
 }
 function entryDraw(id) {
-  const o = ENT[id], all = classStudents(o.cls), done = all.filter(s => o.done(s)).length;
+  if (!$(id + "-cnt")) return;
+  const o = ENT[id], all = entStudents(o.cls), done = all.filter(s => o.done(s)).length;
+  const so = $(id + "-so"); if (so) so.textContent = "Sort: " + (ESORT === "roll" ? "Roll" : "Name");
   $(id + "-cnt").textContent = o.counter ? `${done}/${all.length} entered` : `${all.length} students`; $(id + "-bar").style.width = (o.counter && all.length ? done / all.length * 100 : 0) + "%";
   $(id + "-bar").parentNode.classList.toggle("hide", !o.counter);
   const has = new Set(all.map(s => s.name[0].toUpperCase()));
   $(id + "-al").innerHTML = `<button data-a="eLetter" data-e="${id}" data-l="" class="all ${o.letter || o.q ? "" : "on"}">All</button>` + "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").map(l => `<button data-a="eLetter" data-e="${id}" data-l="${l}" class="${l === o.letter ? "on" : ""}" ${has.has(l) ? "" : "disabled"}>${l}</button>`).join("");
-  const list = all.filter(s => o.q ? s.name.toLowerCase().includes(o.q) : (!o.letter || s.name[0].toUpperCase() === o.letter));
-  $(id + "-ls").innerHTML = list.map(s => `<button class="st ${o.done(s) ? "done" : ""}" data-a="ePick" data-e="${id}" data-id="${esc(s.id)}"><span>${esc(s.name)}</span><span class="tail">${o.tail ? o.tail(s) : ""}</span></button>`).join("") || `<p class="sub">No students found.</p>`;
+  const list = all.filter(s => o.q ? (s.name.toLowerCase().includes(o.q) || String(s.roll || "").toLowerCase() === o.q) : (!o.letter || s.name[0].toUpperCase() === o.letter)); o.list = list;
+  $(id + "-ls").innerHTML = list.map(s => `<button class="st ${o.done(s) ? "done" : ""}" data-a="ePick" data-e="${id}" data-id="${esc(s.id)}"><span>${rollTag(s)}${esc(s.name)}</span><span class="tail">${o.tail ? o.tail(s) : ""}</span></button>`).join("") || `<p class="sub">No students found.</p>`;
 }
 A.eLetter = b => { const o = ENT[b.dataset.e], l = b.dataset.l; o.letter = !l || o.letter === l ? "" : l; o.q = ""; const q = $(o.id + "-q"); if (q) q.value = ""; entryDraw(o.id); };
 A.ePick = b => ENT[b.dataset.e].pick(b.dataset.id);
 function entryNext(id, sid) {      // next student who still has no entry; null when everyone is done
-  const o = ENT[id], all = classStudents(o.cls), i = all.findIndex(s => s.id === sid);
+  const o = ENT[id], all = o.order ? o.order() : entStudents(o.cls), i = all.findIndex(s => s.id === sid);
   return [...all.slice(i + 1), ...all.slice(0, i)].find(s => !o.done(s)) || null;
 }
 
@@ -439,7 +446,7 @@ const tLbl = (c, sub, t) => t.term && subMode(c, sub) === "grade" ? "Grade" : "/
 V.marks = async host => {
   setTitle("Test marks", "Set the test once, then tap names to enter marks.");
   if (!pairs().length) return host.innerHTML = noAccess("Ask the admin to assign a class and subject to you.");
-  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div id="tchb"></div><div class="row"><input id="tname" class="hide" placeholder="Test name (e.g. Unit 1)" aria-label="Test name"></div><div id="tcc"></div><div class="row"><input id="trm" placeholder="Remarks (optional)" aria-label="Remarks"></div><div class="row"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
+  host.innerHTML = `<div class="card"><div class="row">${pairHTML("m")}</div><div id="tchb"></div><div class="row"><input id="tname" class="hide" placeholder="Test name (e.g. Unit 1)" aria-label="Test name"></div><div id="tcc"></div><div class="row"><input id="trm" placeholder="Remarks (optional)" aria-label="Remarks"></div><div class="row"><input id="max" type="number" inputmode="numeric" placeholder="Max marks"><input id="tdate" type="date" value="${today()}" aria-label="Test date"></div><div class="row chips">${[10, 20, 25, 40, 50, 100].map(n => `<button type="button" class="chip" data-a="mMaxSet" data-n="${n}">${n}</button>`).join("")}</div><p></p><button class="btn" data-a="mStart">Start entry</button></div>
    <div id="mhist"></div><div id="mentry"></div>`;
   fillPair("m"); A.pairDone_m = () => { mHist(); mChapters(); }; mHist(); mChapters();
 };
@@ -450,9 +457,12 @@ async function mHist() {
   if (!$("mhist") || $("mc").value !== c || $("ms").value !== s) return;
   const f = D[path] || {}, all = Object.entries(f.tests || {}).sort((a, b) => b[1].date.localeCompare(a[1].date)), list = MH.all ? all : all.slice(0, 5), n = classStudents(c).length;
   const na = avList(path).filter(a => a.kind === "test").length;
+  if ($("max") && !$("max").value) { const lt = all.find(([, t]) => !t.term); if (lt) $("max").value = lt[1].max; }          // same maximum as the last test
   $("mhist").innerHTML = all.length || na ? `<div class="card"><div class="row between"><b>Test history · ${esc(c)} ${esc(s)}</b><span>${all.length > 5 ? `<button class="link" data-a="mHAll">${MH.all ? "Show recent" : "Show all " + all.length}</button>` : ""}${na ? `<button class="link" data-a="mArch">Archive (${na})</button>` : ""}</span></div>${list.map(([id, t]) => { const e = Object.keys((f.marks || {})[id] || {}).length; return `<div class="trow"><div><b>${esc(t.name)}</b>${t.term ? " " + pill("Term") : ""}<br><small>${fmtD(t.date)} · ${tMaxTxt(t, c, s)} · ${e}/${n} entered</small></div><div class="row"><button class="btn alt sm" data-a="mResume" data-t="${esc(id)}">Open</button><button class="btn alt sm" data-a="mEditT" data-t="${esc(id)}">Edit</button><button class="btn alt sm" data-a="mDelT" data-t="${esc(id)}">Delete</button></div></div>`; }).join("")}</div>` : "";
 }
 A.mHAll = () => { MH.all = !MH.all; mHist(); };
+A.mMaxSet = b => { $("max").value = b.dataset.n; };
+A.mMax = () => { const x = $("mx"); x.type = "number"; x.className = "big"; const t = $("mxt"); if (t) t.remove(); x.focus(); x.select(); };
 A.mResume = b => busy(b, () => mRun($("mentry"), $("mc").value, $("ms").value, b.dataset.t));
 A.mStart = b => busy(b, async () => {
   const c = $("mc").value, s = $("ms").value, max = +$("max").value, date = $("tdate").value, rm = $("trm").value.trim();
@@ -473,16 +483,40 @@ async function mRun(host, c, s, tid, quiet, local) {
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
   rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}${t.rm ? " · " + esc(t.rm) : ""}${syl}`,
-    tools: `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
+    tools: (M.mode === "marks" ? `<button class="btn alt sm" data-a="mGrid">Quick grid</button>` : "") + `<button class="btn alt sm" data-a="mAbs">Mark remaining absent</button><button class="btn alt sm" data-a="mManage">Edit / delete entries</button>`,
     done: x => !!mk(x.id), tail: x => { const e = mk(x.id); return e ? esc(mTxt(e)) : ""; }, pick: mOpen });
   if (!quiet) host.scrollIntoView({ behavior: "smooth" });
+}
+/* quick grid: every student on one screen, type the mark, Enter moves to the next row, "a" = absent, saved as you go */
+A.mGrid = () => mGridDraw();
+A.mList = () => mRun($("mentry"), M.cls, M.sub, M.tid, true, true);
+function mgCount() { const n = classStudents(M.cls), d = n.filter(s => mk(s.id)).length, c = $("mg-cnt"); if (c) c.textContent = d + "/" + n.length + " entered"; const b = $("mg-bar"); if (b) b.style.width = (n.length ? d / n.length * 100 : 0) + "%"; }
+function mGridDraw() {
+  const host = $("mentry"); if (!host || !M.path) return; const st = entStudents(M.cls);
+  host.innerHTML = `<div class="card entry" id="mgrid"><div class="row between"><b id="mg-cnt" class="cnt"></b><span class="row"><button type="button" class="chip sm" data-a="eSort">Sort: ${ESORT === "roll" ? "Roll" : "Name"}</button><button type="button" class="chip sm" data-a="mList">Name list</button></span></div><div class="bar"><i id="mg-bar"></i></div>
+   <p class="sub"><b>${esc(M.t.name)}</b> · ${esc(M.sub)} · max ${M.max}. Type the marks and press Enter. Type <b>a</b> for absent, clear the box to remove an entry.</p>
+   <div class="row tools"><button class="btn alt sm" data-a="mAbs">Mark remaining absent</button></div>
+   ${st.map(s => { const e = mk(s.id); return `<div class="gr"><span class="gn">${rollTag(s)}${esc(s.name)}</span><input class="gm" type="text" inputmode="decimal" enterkeyhint="next" autocomplete="off" data-id="${esc(s.id)}" value="${e ? (e.ab ? "A" : numE(e) ? e.m : "") : ""}" placeholder="–" aria-label="Marks for ${esc(s.name)}"><small>/ ${M.max}</small></div>`; }).join("")}</div>`;
+  mgCount();
+  const g = $("mgrid");
+  g.onkeydown = ev => { if (!ev.target.classList.contains("gm") || ev.key !== "Enter") return; ev.preventDefault(); const all = [...g.querySelectorAll(".gm")], i = all.indexOf(ev.target); mgSave(ev.target); const nx = all[i + 1]; if (nx) { nx.focus(); nx.select(); } else ev.target.blur(); };
+  g.onchange = ev => { if (ev.target.classList.contains("gm")) mgSave(ev.target); };
+  g.oninput = ev => { const t = ev.target; if (!t.classList.contains("gm")) return; const r = t.value.trim(), v = +r, bad = r !== "" && !/^a/i.test(r) && !(/^\d*\.?\d+$/.test(r) && v >= 0 && v <= M.max); t.closest(".gr").classList.toggle("bad", bad); };
+}
+function mgSave(inp) {
+  const id = inp.dataset.id, raw = inp.value.trim(), e = mk(id), max = M.max, row = inp.closest(".gr"), path = M.path, tid = M.tid, name = stuById(id).name; let rec = null;
+  if (raw === "") { if (!e) return row.classList.remove("bad", "ok"); }
+  else if (/^a/i.test(raw)) { if (e && e.ab) { inp.value = "A"; return; } rec = { ab: 1, max, r: (e && e.r) || "", by: S.me.name, t: Date.now() }; }
+  else { const v = +raw; if (!/^\d*\.?\d+$/.test(raw) || v < 0 || v > max) return row.classList.add("bad"); if (e && numE(e) && e.m === v) return row.classList.remove("bad"); rec = { m: v, max, r: (e && e.r) || "", by: S.me.name, t: Date.now() }; }
+  patchQ(path, [{ k: `marks.${tid}.${id}`, v: rec, base: e && e.t != null ? e.t : null }], err => { if (M.path === path && M.tid === tid) { toast(name + ": marks were not saved. " + err.message, true); if ($("mgrid")) mGridDraw(); } });
+  inp.value = rec ? (rec.ab ? "A" : rec.m) : ""; row.classList.remove("bad"); row.classList.toggle("ok", !!rec); mgCount();
 }
 function mOpen(id) {
   const s = stuById(id), e = mk(id) || { m: "", max: M.max, r: "" }, md = M.mode, T = M.t || {};
   let body;
   if (md === "grade") body = `<p class="sub">Award a grade for this exam. Marks are optional and are not printed on mark sheets or report cards.</p><select id="mg" aria-label="Grade" autofocus><option value="">Choose grade</option>${gradeList().map(g => `<option ${e.g === g ? "selected" : ""}>${esc(g)}</option>`).join("")}</select><p></p><div class="mrow"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks (optional)" enterkeyhint="done" value="${e.m ?? ""}" placeholder="Marks (optional)"><b>/</b><input class="big" id="mx" type="number" inputmode="decimal" aria-label="Max marks" value="${e.max || M.max || ""}" placeholder="Max"></div>`;
   else if (md === "split") body = `<p class="sub">Type the total, or enter theory and assessment (both optional) and the total is calculated. Only the total is printed on mark sheets and report cards.</p><div class="m3"><label class="mc">Theory<input class="big" id="mth" type="number" inputmode="decimal" value="${e.th ?? ""}" placeholder="–"><small>/ ${T.tmax ?? "?"}</small></label><label class="mc">Assessment<input class="big" id="mas" type="number" inputmode="decimal" enterkeyhint="done" value="${e.as ?? ""}" placeholder="–"><small>/ ${T.amax ?? "?"}</small></label><label class="mc">Total<input class="big" id="mtt" type="number" inputmode="decimal" value="${e.m ?? ""}" placeholder="0" autofocus><small>/ ${M.max}</small></label></div><p class="sub" id="mtot"></p>`;
-  else body = `<div class="mrow"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input class="big" id="mx" type="number" aria-label="Max marks" value="${e.max}"></div>`;
+  else body = `<div class="mrow"><input class="big" id="mm" type="number" inputmode="decimal" aria-label="Marks" enterkeyhint="done" value="${e.m ?? ""}" placeholder="0" autofocus><b>/</b><input id="mx" type="hidden" value="${e.max}"><b id="mxt">${e.max}</b><button type="button" class="link" data-a="mMax">edit max</button></div>`;
   sheet(`<h2>${esc(s.name)}</h2>${e.ab ? `<p class="sub">Currently marked absent.</p>` : ""}${body}
    <p><input id="mr" placeholder="Remark (optional)" value="${esc(e.r || "")}" style="width:100%"></p>
    <div class="row"><button class="btn" data-a="mSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="mSkip" data-id="${esc(id)}">Skip</button></div>
@@ -534,7 +568,7 @@ A.mAbs = b => {
   if (!confirm(`Mark the ${rest.length} students without marks as absent (did not give this test)?`)) return;
   const ops = rest.map(s => ({ k: `marks.${M.tid}.${s.id}`, v: { ab: 1, max: M.max, r: "", by: S.me.name, t: Date.now() } }));
   patchQAll(M.path, ops, e => { toast("Not saved: " + e.message, true); if ($("m-ls")) entryDraw("m"); });
-  entryDraw("m"); toast(rest.length + " marked absent");
+  entryDraw("m"); if ($("mgrid")) mGridDraw(); toast(rest.length + " marked absent");
 };
 /* list of saved entries: edit one, delete several */
 A.mManage = () => {
@@ -690,10 +724,47 @@ function nDates() {
 A.nDate = b => { N.date = b.dataset.d; if ($("ndate")) $("ndate").value = N.date; nbDraw(); };
 function nbDraw() {
   nbMark(); const na = avList(N.ep).filter(a => a.kind === "day").length;
-  $("nbody").innerHTML = `<div class="seg" role="tablist"><button class="${N.view === "entry" ? "on" : ""}" data-a="nView" data-v="entry">Enter</button><button class="${N.view === "heat" ? "on" : ""}" data-a="nView" data-v="heat">Heatmap</button></div>${na ? `<p class="row"><button class="link" data-a="nArch">Archive (${na})</button></p>` : ""}<div id="nmain"></div>`;
+  $("nbody").innerHTML = `<div class="seg" role="tablist"><button class="${N.view === "entry" ? "on" : ""}" data-a="nView" data-v="entry">Enter</button><button class="${N.view === "grid" ? "on" : ""}" data-a="nView" data-v="grid">Grid</button><button class="${N.view === "heat" ? "on" : ""}" data-a="nView" data-v="heat">Heatmap</button></div>${na ? `<p class="row"><button class="link" data-a="nArch">Archive (${na})</button></p>` : ""}<div id="nmain"></div>`;
   if (N.view === "heat") return nbHeat();
-  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)}${N.term ? " · " + esc(N.term) : ""} · ${chFor(N.ch, N.term).filter(x => taught(x.c)).length} chapters being checked${nDates()}`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id); if (e) return nbDone(e, N.ch) + "/" + nbTot(e, N.ch); const p = nPrev(s.id); return p ? `<span class="prev">last ${esc(fmtD(p.d))} · ${nbDone(p.e, N.ch)}/${nbTot(p.e, N.ch)}</span>` : ""; }, tools: `<button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
+  if (N.view === "grid") return nbGrid();
+  entry($("nmain"), { id: "n", cls: N.cls, note: `<b>${esc(N.sub)}</b> · ${fmtD(N.date)}${N.term ? " · " + esc(N.term) : ""} · ${chFor(N.ch, N.term).filter(x => taught(x.c)).length} chapters being checked${nDates()}`, done: s => !!ne(s.id), tail: s => { const e = ne(s.id); if (e) return nbDone(e, N.ch) + "/" + nbTot(e, N.ch); const p = nPrev(s.id); return p ? `<span class="prev">last ${esc(fmtD(p.d))} · ${nbDone(p.e, N.ch)}/${nbTot(p.e, N.ch)}</span>` : ""; }, tools: `<button class="btn alt sm" data-a="nClsAll">Whole class: all done</button><button class="btn alt sm" data-a="nClsLast">Whole class: same as last</button><button class="btn alt sm" data-a="nDay">Move / delete this date's entries</button>`, pick: nOpenStu });
 }
+/* whole class in one go (only students with no entry on this date); then open or tap just the exceptions */
+function nbClassFill(mode) {
+  const todo = classStudents(N.cls).filter(x => !ne(x.id)); if (!todo.length) return toast("Everyone already has an entry for this date.");
+  const vis = new Set(chFor(N.ch, N.term).filter(x => taught(x.c)).map(x => x.i)), t = Date.now(), ops = [];
+  todo.forEach(x => {
+    let st; if (mode === "last") { const p = nPrev(x.id); if (!p) return; st = N.ch.map((c, i) => vis.has(i) ? p.e.s[i] || 0 : 0); } else st = N.ch.map((c, i) => vis.has(i) ? 1 : 0);
+    const v = { s: st, by: S.me.name, t }; if (N.term) v.tm = N.term; ops.push({ k: `entries.${N.date}.${x.id}`, v });
+  });
+  if (!ops.length) return toast("None of them has an earlier entry to copy.", true);
+  if (!confirm(mode === "last" ? `Copy each student's previous entry for ${fmtD(N.date)} (${ops.length} of ${todo.length} students without an entry have one)?` : `Mark all chapters done for the ${ops.length} students without an entry on ${fmtD(N.date)}? Then open only those who differ.`)) return;
+  const ep = N.ep, date = N.date;
+  patchQAll(ep, ops, e => { toast("Notebook entries were not saved: " + e.message, true); if (N.ep === ep && N.date === date) nbDraw(); });
+  nbDraw(); toast(ops.length + " students filled in");
+}
+A.nClsAll = () => nbClassFill("all"); A.nClsLast = () => nbClassFill("last");
+let NGV = [];
+const ngRow = x => { const e = ne(x.id); return `<td><button class="link nmb" data-a="nHist" data-id="${esc(x.id)}">${rollTag(x)}${esc(x.name)}</button></td>` + NGV.map(c => { const v = e ? (e.s[c.i] || 0) : null; return `<td><button class="gc ${v == null ? "g_" : "s" + v}" data-a="ngCell" data-id="${esc(x.id)}" data-i="${c.i}" aria-label="${esc(x.name)}, chapter ${esc(chNo(c.c, c.j))}">${v == null ? "·" : SYM[v]}</button></td>`; }).join(""); };
+function nbGrid() {
+  NGV = chFor(N.ch, N.term).map((x, j) => Object.assign({ j }, x)).filter(x => taught(x.c));
+  if (!NGV.length) { $("nmain").innerHTML = `<div class="card empty"><b>No chapters are being checked</b><p class="sub">Mark chapters as taught in Syllabus first.</p></div>`; return; }
+  $("nmain").innerHTML = `<div class="card"><p class="sub">${fmtD(N.date)} · tap a box to cycle ✔ done → ➖ partial → ✖ pending. A dot means no entry yet; the first tap on a dot creates the entry (other chapters pending), so use <b>Whole class: all done</b> first. Saved at once.</p>
+   <div class="row tools"><button class="btn alt sm" data-a="nClsAll">Whole class: all done</button><button class="btn alt sm" data-a="nClsLast">Whole class: same as last</button><button type="button" class="chip sm" data-a="eSort">Sort: ${ESORT === "roll" ? "Roll" : "Name"}</button></div>
+   <div class="scroll"><table class="ngrid"><thead><tr><th>Student</th>${NGV.map(c => `<th title="${esc(c.c.n)}">${esc(chNo(c.c, c.j))}</th>`).join("")}</tr></thead><tbody>${entStudents(N.cls).map(x => `<tr data-id="${esc(x.id)}">${ngRow(x)}</tr>`).join("")}</tbody></table></div><p class="sub">Chapters: ${NGV.map(c => `${esc(chNo(c.c, c.j))}. ${esc(c.c.n)}`).join(" · ")}</p></div>`;
+}
+A.ngCell = b => {
+  const id = b.dataset.id, i = +b.dataset.i, e = ne(id), s = e ? e.s.slice() : []; while (s.length < N.ch.length) s.push(0);
+  s[i] = nextS(s[i] || 0);
+  const v = Object.assign({}, e || {}, { s, by: S.me.name, t: Date.now() }); if (!v.tm && N.term) v.tm = N.term;
+  const ep = N.ep, date = N.date, name = stuById(id).name;
+  patchQ(ep, [{ k: `entries.${date}.${id}`, v, base: e && e.t != null ? e.t : null }], err => {
+    if (N.ep !== ep || N.date !== date) return;
+    if (err.conflict && err.conflict[0].current) return nConflict(id, v, err.conflict[0].current);
+    toast(name + ": notebook entry was not saved. " + err.message, true); if (N.view === "grid") nbGrid();
+  });
+  if (e) { b.className = "gc s" + s[i]; b.textContent = SYM[s[i]]; } else { const tr = b.closest("tr"); tr.innerHTML = ngRow(stuById(id)); }
+};
 A.nView = b => { N.view = b.dataset.v; nbDraw(); };
 function nbHeat() {
   const en = D[N.ep].entries || {}, vis = chFor(N.ch, N.term), st = classStudents(N.cls);
@@ -1413,7 +1484,7 @@ A.mcDefault = () => { const cls = C.cls; patchQ(P.k("monitors", cls), [{ k: "cat
 function cFine(host) {
   const rows = fineRows(C.cls), due = rows.filter(f => !f.paid).reduce((n, f) => n + f.amt, 0), got = rows.filter(f => f.paid).reduce((n, f) => n + f.amt, 0), def = classStudents(C.cls).filter(s => fineDue(C.cls, s.id) > 0).length;
   host.innerHTML = `<div class="kpis"><div class="kpi"><small>Pending</small><b>${rupee(due)}</b></div><div class="kpi"><small>Collected</small><b>${rupee(got)}</b></div><div class="kpi ${def ? "bad" : ""}"><small>Students with dues</small><b>${def}</b></div></div><div id="fent"></div><div id="flog"></div>`;
-  entry($("fent"), { id: "f", cls: C.cls, counter: false, done: () => false, note: "Tap a student to log a fine or an I-card / other due. Red badges show what is still pending.", tail: s => { const d = fineDue(C.cls, s.id); return d ? `<span class="pill bad">${rupee(d)} due</span>` : ""; }, pick: fOpen }); logDraw("fines");
+  entry($("fent"), { id: "f", cls: C.cls, counter: false, done: () => false, tools: `<button class="btn alt sm" data-a="fMulti">Fine several students</button>`, note: "Tap a student to log a fine or an I-card / other due. Red badges show what is still pending.", tail: s => { const d = fineDue(C.cls, s.id); return d ? `<span class="pill bad">${rupee(d)} due</span>` : ""; }, pick: fOpen }); logDraw("fines");
 }
 function fOpen(id) {
   const s = stuById(id), rows = fineRows(C.cls, id).sort((a, b) => b.date.localeCompare(a.date));
@@ -1422,11 +1493,26 @@ function fOpen(id) {
    <div class="row"><select id="ft" data-c="fType" aria-label="Type">${Object.entries(FTYPE).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select><input id="fa" type="number" inputmode="decimal" placeholder="Amount ₹" value="${S.cfg.nonEnglishFine || ""}" aria-label="Amount" autofocus><input id="fd" type="date" value="${today()}" aria-label="Date"></div>
    <p><input id="fr" placeholder="Remark (optional)" style="width:100%"></p><div class="row"><button class="btn" data-a="fSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="fNext" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
 }
-A.fType = b => { $("fa").value = b.value === "nonEnglish" ? S.cfg.nonEnglishFine || "" : ""; };
+const FLAST = {};
+A.fType = b => { $("fa").value = b.value === "nonEnglish" ? S.cfg.nonEnglishFine || "" : FLAST[b.value] || ""; };
+A.fMulti = () => {
+  sheet(`<h2>Fine / due for several students</h2><div class="row"><select id="ft" data-c="fType" aria-label="Type">${Object.entries(FTYPE).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}</select><input id="fa" type="number" inputmode="decimal" placeholder="Amount ₹" value="${S.cfg.nonEnglishFine || ""}" aria-label="Amount"><input id="fd" type="date" value="${today()}" aria-label="Date"></div>
+   <p><input id="fr" placeholder="Remark (optional)" style="width:100%"></p><div class="row between"><b id="fmc">0 selected</b><button type="button" class="link" data-a="fmAll">Select all</button></div>
+   <div class="xsets">${entStudents(C.cls).map(x => `<label class="cb"><input type="checkbox" class="fmk" value="${esc(x.id)}"> ${rollTag(x)}${esc(x.name)}</label>`).join("")}</div>
+   <div class="row"><button class="btn" data-a="fmSave" style="flex:2">Save for selected</button></div><div class="err" id="e2"></div>`);
+  $("sheet").onchange = () => { const n = document.querySelectorAll(".fmk:checked").length; if ($("fmc")) $("fmc").textContent = n + " selected"; };
+};
+A.fmAll = () => { const bx = [...document.querySelectorAll(".fmk")], on = bx.some(x => !x.checked); bx.forEach(x => x.checked = on); $("fmc").textContent = bx.filter(x => x.checked).length + " selected"; };
+A.fmSave = () => {
+  const ids = [...document.querySelectorAll(".fmk:checked")].map(x => x.value), amt = +$("fa").value, date = $("fd").value; if (!ids.length) return $("e2").textContent = "Tick at least one student."; if (!(amt > 0)) return $("e2").textContent = "Enter an amount."; if (!date) return $("e2").textContent = "Pick a date.";
+  const type = $("ft").value, r = $("fr").value.trim(), t = Date.now(), cls = C.cls; FLAST[type] = amt;
+  patchQAll(P.k("fines", cls), ids.map((sid, i) => ({ k: "items." + uid("f") + i, v: { sid, type, amt, date, paid: 0, r, by: S.me.name, t } })), e => { toast("Some fines were not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
+  dirty = false; closeSheet(true); cFine($("cbody")); toast(ids.length + " fines saved");
+};
 A.fNext = b => { if (!closeSheet()) return; const n = entryNext("f", b.dataset.id); if (n) fOpen(n.id); };
 A.fSave = b => busy(b, async () => {
   const amt = +$("fa").value; if (!(amt > 0)) return $("e2").textContent = "Enter an amount.";
-  const id = uid("f"), sid = b.dataset.id;
+  const id = uid("f"), sid = b.dataset.id; FLAST[$("ft").value] = amt;
   const cls = C.cls; patchQ(P.k("fines", cls), [{ k: "items." + id, v: { sid, type: $("ft").value, amt, date: $("fd").value, paid: 0, r: $("fr").value.trim(), by: S.me.name, t: Date.now() } }], e => { toast("A fine was not saved: " + e.message, true); if (C.cls === cls && $("cbody")) cTab(); });
   dirty = false; cFine($("cbody")); const n = entryNext("f", sid); n ? fOpen(n.id) : closeSheet(true); toast("Saved");
 });
@@ -1460,6 +1546,7 @@ function cCall(host) {
     if (fyDef(C.cls, y, s.id) && !calledThisWeek(C.cls, s.id, "fee") && !(pr && pr.until >= T)) tocall.push({ s, note: pr ? "promised " + fmtD(pr.until) + ", not confirmed" : fyM(fyCalc(C.cls, y, s.id).owedM) + " due" });
   });
   prom.sort((a, z) => a.c.until.localeCompare(z.c.until));
+  C.queue = [...new Set([...risk, ...tocall, ...stale].map(t => t.s.id))];           // "Save & next" follows this to-call list
   const chips = (L, k) => L.length ? L.map(t => `<button class="chip bad" data-a="cPick" data-k="${k}" data-id="${esc(t.s.id)}">${esc(t.s.name)} <small>${esc(t.note)}</small></button>`).join("") : `<span class="sub">Nobody pending. 🎉</span>`;
   const cov = k => all.filter(s => calledThisWeek(C.cls, s.id, k)).length, open = callsOf(C.cls).filter(c => c.gr && !c.grs && stuById(c.sid));
   const ft = C.ft || "call", ftabs = [["call", "To call", tocall.length], ["prom", "Promised", prom.length], ["plan", "Payment plan", plan.length]];
@@ -1473,7 +1560,7 @@ function cCall(host) {
    <div class="card"><b>Fee calls</b><div class="seg" role="tablist" aria-label="Fee calls" style="margin:8px 0 10px">${ftabs.map(([k, v, n]) => `<button class="${ft === k ? "on" : ""}" data-a="cFt" data-k="${k}">${v} (${n})</button>`).join("")}</div>${feeBody}
     <p class="sub">This week: feedback ${cov("fb")}/${all.length} · fee ${cov("fee")}/${all.length} parents called.</p></div>
    <div class="card"><div class="row mid"><label class="fl">Date for the calls you enter<input id="cdd" type="date" value="${C.callDate || today()}" data-c="cDate"></label><p class="sub" style="flex:2;margin:0;min-width:180px">Set it once: every call you log below uses this date.</p></div></div><div id="cent"></div><div id="clog"></div>`;
-  entry($("cent"), { id: "c", cls: C.cls, done: s => calledThisWeek(C.cls, s.id, "fb") || calledThisWeek(C.cls, s.id, "fee"), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: id => callOpen(id) });
+  entry($("cent"), { id: "c", cls: C.cls, order: () => { const q = (C.queue || []).map(stuById).filter(Boolean), set = new Set(q.map(x => x.id)); return [...q, ...entStudents(C.cls).filter(x => !set.has(x.id))]; }, done: s => calledThisWeek(C.cls, s.id, "fb") || calledThisWeek(C.cls, s.id, "fee"), tail: s => { const c = callsOf(C.cls, s.id)[0]; return c ? `${esc(fmtD(c.date))} · ${esc(callTxt(c))}${grBadge(c)}` : ""; }, pick: id => callOpen(id) });
   logDraw("calls");
 }
 A.cFt = b => { C.ft = b.dataset.k; cCall($("cbody")); };
@@ -1515,9 +1602,10 @@ function callOpen(id, kind) {
    <div class="row between ckrow"><b>Calling for</b><span class="row"><button type="button" class="chip" id="ckfb" data-a="cKT" data-k="fb">Feedback</button><button type="button" class="chip" id="ckfee" data-a="cKT" data-k="fee">Fee</button></span></div>
    <div id="chfb" class="hide"><p class="sub" style="margin:8px 0 2px"><b>Feedback calls</b></p>${r && r.risk.length ? `<p>${r.risk.map(x => pill(x, "bad")).join(" ")}</p>` : ""}${hist("fb")}</div>
    <div id="chfee" class="hide"><p class="sub" style="margin:8px 0 2px"><b>Fee calls</b></p>${fc.r ? `<p>${pill(fyText(C.cls, y, id))} ${fc.owedM > 0 ? pill(fyM(fc.owedM) + " due", "bad") : ""}${fc.bal != null ? " " + pill("₹" + fc.bal + " yearly due") : ""}</p>` : `<p class="sub">No fee record for ${fyLab(y)} yet.</p>`}${hist("fee")}</div>
-   <div class="form"><div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><select id="cs" data-c="cStCh" aria-label="Call status">${CALL_ST.map(x => `<option>${esc(x)}</option>`).join("")}</select></div>
-    <div id="cfb" class="hide"><input id="cn" placeholder="Remarks for feedback (optional)"><div class="cpk"><select id="cr" aria-label="Feedback">${FB_RESP.map(x => `<option>${esc(x)}</option>`).join("")}</select><textarea id="cgt" rows="3" placeholder="Grievance (leave empty if none)" aria-label="Grievance"></textarea></div></div>
-    <div id="cfee" class="hide"><input id="cfn" placeholder="Remarks for fee (optional)"><div class="cpk"><select id="cfr" data-c="cRespCh" aria-label="Fee">${FEE_RESP.map(x => `<option>${esc(x)}</option>`).join("")}</select><div id="cuw" class="hide"><label>Will deposit until<input id="cu" type="date" value="${wk}"></label></div></div></div></div>
+   <div class="form"><div class="row"><input id="cd" type="date" value="${C.callDate || today()}" aria-label="Call date"><input id="cs" type="hidden" value="${CALL_ST[0]}"></div><div class="row chips">${CALL_ST.map((x, i) => `<button type="button" class="chip${i ? "" : " on"}" data-a="cChip" data-f="cs" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div>
+    <div id="cfb" class="hide"><input id="cn" placeholder="Remarks for feedback (optional)"><div class="cpk"><input id="cr" type="hidden" value="${FB_RESP[0]}"><div class="row chips">${FB_RESP.map((x, i) => `<button type="button" class="chip${i ? "" : " on"}" data-a="cChip" data-f="cr" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div><textarea id="cgt" rows="3" placeholder="Grievance (leave empty if none)" aria-label="Grievance"></textarea></div></div>
+    <div id="cfee" class="hide"><input id="cfn" placeholder="Remarks for fee (optional)"><div class="cpk"><input id="cfr" type="hidden" value="${FEE_RESP[0]}"><div class="row chips">${FEE_RESP.map((x, i) => `<button type="button" class="chip${i ? "" : " on"}" data-a="cChip" data-f="cfr" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div><div id="cuw" class="hide"><label>Will deposit until<input id="cu" type="date" value="${wk}"></label></div></div></div></div>
+   <div class="row chips"><small class="sub">Parent did not answer, log in one tap:</small>${CALL_ST.slice(1).map(x => `<button type="button" class="chip" data-a="cQuick" data-s="${esc(x)}" data-id="${esc(id)}">${esc(x)}</button>`).join("")}</div>
    <p></p><div class="row"><button class="btn" data-a="cSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button><button class="btn alt" data-a="cSkip" data-id="${esc(id)}">Skip</button></div><div class="err" id="e2"></div>`);
   cKApply();
 }
@@ -1529,6 +1617,8 @@ function cKApply() {
 }
 A.cKT = b => { CS[b.dataset.k] = !CS[b.dataset.k]; C.ks = Object.assign({}, CS); cKApply(); };
 A.cStCh = () => cKApply();
+A.cChip = b => { $(b.dataset.f).value = b.dataset.v; b.parentNode.querySelectorAll(".chip").forEach(x => x.classList.toggle("on", x === b)); cKApply(); };
+A.cQuick = b => { $("cs").value = b.dataset.s; A.cSave(b); };
 A.cSkip = b => { if (!closeSheet()) return; const n = entryNext("c", b.dataset.id); if (n) callOpen(n.id); };
 A.cSave = b => {
   const sid = b.dataset.id, date = $("cd").value, st = $("cs").value, pk = st === "Picked", cls = C.cls, ops = [];
@@ -1715,13 +1805,21 @@ const monthLabel = m => new Date(m + "-01T00:00").toLocaleDateString("en-IN", { 
 function cAtt(host) {
   C.am = C.am || today().slice(0, 7); const wd = getAt(FD("attendance", C.cls), [C.am, "_wd"]);
   host.innerHTML = `<div class="card"><div class="row"><label class="fl">Month<input id="am" type="month" value="${C.am}" data-c="aMonth"></label><label class="fl">Working days this month (optional)<input id="awd" type="number" inputmode="numeric" value="${wd ?? ""}" data-c="aWd"></label></div></div><div id="aent"></div>`;
-  entry($("aent"), { id: "a", cls: C.cls, note: `Total days absent and leaves taken in <b>${esc(monthLabel(C.am))}</b>. Tap a student.`, done: s => !!attOf(C.cls, C.am, s.id), tail: s => { const a = attOf(C.cls, C.am, s.id); return a ? `${a.a || 0} absent · ${a.l || 0} leave` : ""; }, pick: aOpen });
+  entry($("aent"), { id: "a", cls: C.cls, tools: `<button class="btn alt sm" data-a="aZero">Everyone else: 0 absent</button>`, note: `Total days absent and leaves taken in <b>${esc(monthLabel(C.am))}</b>. Tap a student.`, done: s => !!attOf(C.cls, C.am, s.id), tail: s => { const a = attOf(C.cls, C.am, s.id); return a ? `${a.a || 0} absent · ${a.l || 0} leave` : ""; }, pick: aOpen });
 }
+A.aZero = () => {
+  const rest = classStudents(C.cls).filter(s => !attOf(C.cls, C.am, s.id)); if (!rest.length) return toast("Everyone already has an entry.");
+  if (!confirm(`Record 0 absent and 0 leave for the ${rest.length} students without an entry in ${monthLabel(C.am)}?`)) return;
+  const cls = C.cls, am = C.am, t = Date.now();
+  patchQAll(P.k("attendance", cls), rest.map(s => ({ k: `${am}.${s.id}`, v: { a: 0, l: 0, by: S.me.name, t } })), e => { toast("Attendance not saved: " + e.message, true); if (C.cls === cls && $("aent")) cAtt($("cbody")); });
+  entryDraw("a"); toast(rest.length + " students recorded as 0 absent");
+};
+A.aQuick = b => { $("aa").value = b.dataset.n; A.aSave($("sheet").querySelector("[data-a=aSave]")); };
 A.aMonth = b => { if (b.value) { C.am = b.value; cAtt($("cbody")); } };
 A.aWd = b => { const cls = C.cls; patchQ(P.k("attendance", cls), [{ k: `${C.am}._wd`, v: b.value === "" ? null : +b.value }], e => toast("Working days not saved: " + e.message, true)); toast("Working days saved"); };
 function aOpen(id) {
   const a = attOf(C.cls, C.am, id) || {};
-  sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">${esc(monthLabel(C.am))}</p><div class="row"><label class="fl">Days absent<input id="aa" type="number" inputmode="numeric" min="0" value="${a.a ?? ""}" placeholder="0" autofocus></label><label class="fl">Leaves taken<input id="al" type="number" inputmode="numeric" min="0" value="${a.l ?? ""}" placeholder="0"></label></div><p></p><div class="row"><button class="btn" data-a="aSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button>${a.t ? `<button class="btn alt" data-a="aClear" data-id="${esc(id)}">Clear</button>` : ""}</div><div class="err" id="e2"></div>`);
+  sheet(`<h2>${esc(stuById(id).name)}</h2><p class="sub">${esc(monthLabel(C.am))}</p><div class="row"><label class="fl">Days absent<input id="aa" type="number" inputmode="numeric" enterkeyhint="next" min="0" value="${a.a ?? ""}" placeholder="0" autofocus></label><label class="fl">Leaves taken<input id="al" type="number" inputmode="numeric" enterkeyhint="done" min="0" value="${a.l ?? ""}" placeholder="0"></label></div><div class="row chips">${[0, 1, 2, 3, 4].map(n => `<button type="button" class="chip" data-a="aQuick" data-n="${n}">${n} absent</button>`).join("")}</div><p></p><div class="row"><button class="btn" data-a="aSave" data-id="${esc(id)}" style="flex:2">Save &amp; next</button>${a.t ? `<button class="btn alt" data-a="aClear" data-id="${esc(id)}">Clear</button>` : ""}</div><div class="err" id="e2"></div>`);
   $("sheet").onkeydown = ev => { if (ev.key === "Enter") A.aSave($("sheet").querySelector("[data-a=aSave]")); };
 }
 A.aSave = b => busy(b, async () => {
@@ -2400,7 +2498,7 @@ A.thNight = b => { TH.night = b.dataset.k; if (TH.mode === "day") TH.mode = "sys
 A.thTime = () => { TH.from = $("thf").value || TH.from; TH.to = $("tht").value || TH.to; themeSave(); };
 
 /* ===== session guard: activity tracking, 1-minute idle sign-out (10 s warning), wipe of local data on every sign-out ===== */
-const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume", "fx"];
+const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume", "fx", "esort"];
 const idleMin = () => { const v = +localStorage.idlem; return IDLE_OPTS.includes(v) ? v : 1; };            // minutes of inactivity before auto sign-out (this device)
 let KEEP = false; try { KEEP = sessionStorage.keep === "1"; } catch { }                                    // "stay signed in" lock for this session
 const srvIdle = () => KEEP ? 43200 : idleMin() * 60 + 30, idleTxt = () => idleMin() === 1 ? "a minute" : idleMin() + " minutes";
