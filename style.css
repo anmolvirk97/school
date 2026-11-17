@@ -506,3 +506,39 @@ html[data-fx=new] .side .sky .ksun{animation:sunPulse 5s ease-in-out infinite}
 .gc{width:42px;height:42px;min-height:42px;border-radius:11px;padding:0;font-weight:800;font-size:17px}
 .gc.g_{background:var(--bg);color:var(--mut)}
 .chip.sm{min-height:36px;padding:6px 12px;font-size:13px}
+
+/* ===== sign-in screen: always fits one screen (phones upright; tablets upright and sideways), no scrolling ===== */
+.login{height:100vh;height:100dvh;min-height:0;box-sizing:border-box;overflow:hidden;grid-template-rows:minmax(0,1fr);align-items:center;padding:calc(58px + env(safe-area-inset-top)) 14px calc(10px + env(safe-area-inset-bottom))}
+.lcard{display:flex;flex-direction:column;box-sizing:border-box;max-height:100%;min-height:0;padding:clamp(14px,2.6dvh,26px) clamp(14px,4vw,22px) clamp(10px,1.8dvh,20px);border-radius:clamp(24px,4dvh,34px)}
+.lcard .brand{margin-bottom:clamp(6px,1.6dvh,18px)}
+.lcard .blogo{width:clamp(36px,6dvh,50px);height:clamp(36px,6dvh,50px)}
+.lcard .av{width:clamp(48px,9dvh,76px);height:clamp(48px,9dvh,76px);margin:clamp(2px,.8dvh,6px) auto clamp(4px,1dvh,8px);font-size:clamp(20px,3.6dvh,30px)}
+.lcard .av.sm{width:44px;height:44px;margin:0;font-size:18px}
+.lcard .lname{font-size:clamp(17px,2.6dvh,21px)}
+.lcard .dots{min-height:clamp(22px,4dvh,36px);margin:clamp(4px,1.2dvh,14px) 0 2px}
+.lcard .err{min-height:clamp(14px,2.2dvh,20px);font-size:clamp(12px,1.8dvh,14px)}
+.lcard .pad{gap:clamp(6px,1.2dvh,10px);margin-top:clamp(4px,1dvh,10px)}
+.lcard .pad button{height:clamp(40px,7.4dvh,60px);font-size:clamp(18px,3dvh,22px)}
+.lcard .lfoot{margin:clamp(6px,1.2dvh,14px) 0 0}
+.lcard .lnote{margin-bottom:clamp(6px,1.2dvh,14px)}
+#acct{min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:none}#acct::-webkit-scrollbar{display:none}
+.lcard .prow{margin:clamp(4px,1dvh,8px) 0}
+@media (orientation:landscape) and (min-width:720px){
+ .login:not(.pick) .lcard{max-width:760px;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"brand pad" "note pad" "acct pad" "user pad" "dots pad" "err pad" "foot foot";column-gap:clamp(20px,4vw,48px);align-content:center}
+ .login:not(.pick) .lcard .brand{grid-area:brand;justify-content:center}.login:not(.pick) .lcard .lnote{grid-area:note}.login:not(.pick) #acct{grid-area:acct}.login:not(.pick) #user{grid-area:user}
+ .login:not(.pick) .lcard .dots{grid-area:dots}.login:not(.pick) .lcard .err{grid-area:err}.login:not(.pick) .lcard .pad{grid-area:pad;align-self:center;margin-top:0}.login:not(.pick) .lcard .lfoot{grid-area:foot}
+}
+@media (max-height:430px){.lcard .lfoot{display:none}.login{padding-top:calc(50px + env(safe-area-inset-top))}}
+
+/* ===== bottom bar on phones: a plain solid bar, the active tab is a rounded square behind its icon (no floating bubble / cut-out) ===== */
+@media(max-width:700px){
+ .app{padding-bottom:calc(84px + env(safe-area-inset-bottom))}
+ html[data-fx=new] nav{background:var(--card);filter:none;overflow:hidden;border-radius:20px 20px 0 0;box-shadow:0 -6px 20px #0b3d3d26;transition:none}
+ html[data-fx=new] nav::before{display:none}
+ html[data-fx=new] nav .nvb{width:48px;height:48px;border-radius:16px}
+ html[data-fx=new] nav button.on svg{transform:none}
+}
+@media(max-width:400px){html[data-fx=new] nav .nvb{width:42px;margin-left:3px}}
+
+/* test entry: only this test's chapters open, the rest of the syllabus sits behind "Show full syllabus" */
+.syl.more{margin-top:6px;background:transparent}.syl.more summary{color:var(--mut)}
