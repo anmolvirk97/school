@@ -249,7 +249,7 @@ function navSet(html) {
 function navPaint() {
   const n = $("nav"), on = n && n.querySelector("button.on"); if (!on || !NVB) return;
   const ph = matchMedia("(max-width:700px)").matches, x = on.offsetLeft + on.offsetWidth / 2, key = Math.round(ph ? x : on.offsetTop);
-  n.style.setProperty("--nx", x + "px"); NVB.style.setProperty("--bx", (ph ? x - 25 : on.offsetLeft) + "px"); NVB.style.setProperty("--by", (ph ? -7 : on.offsetTop) + "px");
+  n.style.setProperty("--nx", x + "px"); NVB.style.setProperty("--bx", (ph ? x - 24 : on.offsetLeft) + "px"); NVB.style.setProperty("--by", on.offsetTop + "px");
   if (n.dataset.px !== undefined && n.dataset.px !== String(key) && fxOn()) { NVB.classList.remove("nvgo"); void NVB.offsetWidth; NVB.classList.add("nvgo"); }
   n.dataset.px = key; if (n.classList.contains("nvinit")) requestAnimationFrame(() => requestAnimationFrame(() => n.classList.remove("nvinit")));
 }
@@ -479,7 +479,7 @@ A.mStart = b => busy(b, async () => {
 async function mRun(host, c, s, tid, quiet, local) {
   const path = P.marks(c, s); await load([path], !local);
   const t = getAt(D[path], ["tests", tid]); if (!t) return toast("That test no longer exists.", true);
-  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], SYL_TERMS.includes(t.term) ? t.term : termNow(), t.ch, t.chi); } catch { }
+  let syl = ""; try { const [sy] = await load([P.syl(c, s)]); syl = sylHTML((sy && sy.chapters) || [], SYL_TERMS.includes(t.term) ? t.term : termNow(), t.ch, t.chi, t.tp); } catch { }
   M = { path, cls: c, sub: s, tid, max: t.max, t, mode: t.term ? subMode(c, s) : "marks" };
   rmark({ v: t.term ? "term" : "marks", c, s, tid, term: t.term || "", t: (t.term ? "Term exam" : "Test marks") + " · " + c + " " + s + " · " + t.name });
   entry(host, { id: "m", cls: c, note: `<b>${esc(t.name)}</b> · ${esc(s)} · ${tMaxTxt(t, c, s)} · ${fmtD(t.date)}${t.rm ? " · " + esc(t.rm) : ""}${syl}`,
@@ -695,11 +695,16 @@ const bkHead = b => b ? `<p class="sub bk">${esc(b)}</p>` : "";
 const nbDone = (e, ch) => { const tm = (e && e.tm) || ""; return ch.reduce((n, c, i) => n + (e && taught(c) && inSet(c, tm) && e.s[i] === 1 ? 1 : 0), 0); };
 const nbTot = (e, ch) => { const tm = (e && e.tm) || ""; return ch.reduce((n, c) => n + (taught(c) && inSet(c, tm) ? 1 : 0), 0); };
 /* chapters with their contents (notes, summary, questions, book exercises ...) - shown on the test screen */
-function sylHTML(ch, tm, hi, chi) {
+function sylHTML(ch, tm, hi, chi, tp) {
   const v = chFor(ch, tm); if (!v.length) return "";
-  const on = x => (chi || []).includes(x.i) || (hi && x.c.n === hi);
-  const row = x => { const c = x.c, dn = chDone(c); return `<div class="sylr${taught(c) ? "" : " dim"}${on(x) ? " hi" : ""}"><b>${esc(chNo(c, x.j))}. ${esc(c.n)}</b>${(c.c && c.c.length) || c.cm ? `<div class="cchips">${c.cm ? `<span class="cct ok">✔ Entire chapter</span>` : ""}${(c.c || []).map(t => `<span class="cct${dn.includes(t) ? " ok" : ""}">${dn.includes(t) ? "✔ " : ""}${esc(t)}</span>`).join("")}</div>` : ""}${c.r ? `<small class="sub">${esc(c.r)}</small>` : ""}</div>`; };
-  return `<details class="syl"${hi || (chi && chi.length) ? " open" : ""}><summary><b>Syllabus${tm ? " · " + esc(tm) : ""}</b> <small>${v.length} ${v.length === 1 ? "chapter" : "chapters"} · ✔ = completed</small></summary>${chGroups(v).map(g => bkHead(g.b) + g.items.map(row).join("")).join("")}</details>`;
+  const on = x => (chi || []).includes(x.i) || (hi && x.c.n === hi), tps = tp || [];
+  const row = (x, mine) => { const c = x.c, dn = chDone(c); let tl = c.c || []; if (mine && tps.length) { const f = tl.filter(t => tps.some(z => z === t || z.endsWith(": " + t))); if (f.length) tl = f; }
+    return `<div class="sylr${taught(c) ? "" : " dim"}${on(x) ? " hi" : ""}"><b>${esc(chNo(c, x.j))}. ${esc(c.n)}</b>${tl.length || c.cm ? `<div class="cchips">${c.cm ? `<span class="cct ok">✔ Entire chapter</span>` : ""}${tl.map(t => `<span class="cct${dn.includes(t) ? " ok" : ""}">${dn.includes(t) ? "✔ " : ""}${esc(t)}</span>`).join("")}</div>` : ""}${c.r ? `<small class="sub">${esc(c.r)}</small>` : ""}</div>`; };
+  const grp = (fn, mine) => chGroups(v).map(g => ({ b: g.b, items: g.items.filter(fn) })).filter(g => g.items.length).map(g => bkHead(g.b) + g.items.map(x => row(x, mine)).join("")).join("");
+  const n = v.filter(on).length, rest = v.length - n;
+  if (!n) return `<details class="syl"><summary><b>Syllabus${tm ? " · " + esc(tm) : ""}</b> <small>${v.length} ${v.length === 1 ? "chapter" : "chapters"} · ✔ = completed</small></summary>${grp(() => true, false)}</details>`;
+  return `<details class="syl" open><summary><b>This test${tm ? " · " + esc(tm) : ""}</b> <small>${n} ${n === 1 ? "chapter" : "chapters"} · ✔ = completed</small></summary>${grp(on, true)}</details>`
+    + (rest ? `<details class="syl more"><summary><b>Show full syllabus</b> <small>${rest} more ${rest === 1 ? "chapter" : "chapters"}</small></summary>${grp(x => !on(x), false)}</details>` : "");
 }
 
 V.nb = host => {
@@ -2501,7 +2506,7 @@ A.thTime = () => { TH.from = $("thf").value || TH.from; TH.to = $("tht").value |
 const IDLE_OPTS = [1, 2, 5, 10, 15, 30], KEEP_KEYS = ["theme", "did", "recent", "apiUrl", "q", "logo", "logoh", "rcopt", "tmOpt", "idlem", "resume", "fx", "esort"];
 const idleMin = () => { const v = +localStorage.idlem; return IDLE_OPTS.includes(v) ? v : 1; };            // minutes of inactivity before auto sign-out (this device)
 let KEEP = false; try { KEEP = sessionStorage.keep === "1"; } catch { }                                    // "stay signed in" lock for this session
-const srvIdle = () => KEEP ? 43200 : idleMin() * 60 + 30, idleTxt = () => idleMin() === 1 ? "a minute" : idleMin() + " minutes";
+const srvIdle = () => KEEP ? 43200 : idleMin() * 60 + 150, idleTxt = () => idleMin() === 1 ? "a minute" : idleMin() + " minutes";
 const applyIdle = () => { if (token) api("POST", "/session/idle", { sec: srvIdle() }).catch(() => { }); };
 let lastAct = Date.now(), lastPing = 0, BG = 0, BUSYN = 0, outBusy = false, printing = false;
 const wipeLocal = () => { try { Object.keys(localStorage).forEach(k => { if (!KEEP_KEYS.includes(k) && !k.startsWith("theme_")) localStorage.removeItem(k); }); sessionStorage.removeItem("tok"); sessionStorage.removeItem("keep"); } catch { } };
@@ -2511,8 +2516,9 @@ function deviceLabel() {
   const os = /Android/.test(ua) ? "Android" : /iPhone|iPad|iPod/.test(ua) ? "iOS" : /Windows/.test(ua) ? "Windows" : /Mac OS/.test(ua) ? "Mac" : /Linux/.test(ua) ? "Linux" : "device", kind = /Mobile/.test(ua) ? "phone" : /Android|iPad/.test(ua) ? "tablet" : "computer";
   return `${b} · ${os} ${kind} · #${deviceId().slice(0, 4)}`;
 }
-function actHandler() {
-  if (!token || !S.me) return; const now = Date.now(); lastAct = now; if (!$("idle").classList.contains("hide")) hideIdle();
+function actHandler(e) {
+  if (!token || !S.me) return; const now = Date.now(); lastAct = now;
+  if (!$("idle").classList.contains("hide") && !(e && e.target && e.target.closest && e.target.closest("#idle"))) hideIdle();      // a tap on "Stay signed in" is handled by the button itself (hiding the box on pointer-down made the click fall through to what lies beneath)
   if (now - lastPing > 20000) { lastPing = now; api("POST", "/session/ping", {}).catch(() => { }); }          // tells the server this profile is in use right now
 }
 ["pointerdown", "pointermove", "keydown", "touchstart", "touchmove", "wheel", "scroll", "input", "click"].forEach(ev => addEventListener(ev, actHandler, { passive: true, capture: true }));
@@ -2680,16 +2686,16 @@ A.sigScreen = () => sheetL(`<h2>My signature</h2><p class="sub">Printed on mark 
 A.pinSave = b => busy(b, async () => { if ($("np").value !== $("np2").value) return $("e2").textContent = "The two new PINs do not match."; try { await api("POST", "/pin/change", { oldPin: $("op").value, newPin: $("np").value }); closeSheet(true); toast("PIN changed"); } catch (x) { $("e2").textContent = x.message; } });
 
 /* ----- right panel (profile + this week's monitors over the school skyline) ----- */
-const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMax meet" aria-hidden="true"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8a7a"/><stop offset="1" stop-color="#0b4a4a"/></linearGradient></defs>
+const SKY = `<svg class="sky" viewBox="0 0 300 250" preserveAspectRatio="xMidYMax meet" aria-hidden="true" style="overflow:visible"><defs><linearGradient id="gw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2d8a7a"/><stop offset="1" stop-color="#0b4a4a"/></linearGradient></defs>
  <g class="rise r3"><circle class="ksun" cx="238" cy="52" r="20" fill="#dfe97a" opacity=".9"/></g>
  <g class="kcl" fill="#fff" opacity=".35"><g class="drift d1"><ellipse cx="60" cy="40" rx="30" ry="7"/><ellipse cx="90" cy="48" rx="22" ry="6"/></g></g>
  <g class="kcl2" fill="#fff" opacity=".26"><g class="drift d2"><ellipse cx="196" cy="28" rx="24" ry="6"/><ellipse cx="218" cy="34" rx="16" ry="5"/></g></g>
  <g class="kcl3" fill="#fff" opacity=".2"><g class="drift d3"><ellipse cx="128" cy="66" rx="20" ry="4.5"/></g></g>
- <g class="rise r1"><g class="ksch"><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><g class="kflag" fill="#e2574c">${[0, 1, 2, 3, 4, 5, 6].map(k => `<rect class="fl" style="--k:${k}" x="${(150 + k * 3.1).toFixed(1)}" y="${88 + k}" width="3.3" height="${14 - k * 2}"/>`).join("")}</g>
+ <g class="rise r1"><g class="ksch"><rect x="92" y="150" width="116" height="62" fill="#e9f5ef"/><rect x="72" y="172" width="26" height="40" fill="#cfe8dd"/><rect x="202" y="172" width="26" height="40" fill="#cfe8dd"/><polygon points="86,150 150,112 214,150" fill="#0b4a4a"/><rect x="138" y="128" width="24" height="22" fill="#dfe97a"/><line x1="150" y1="112" x2="150" y2="88" stroke="#e9f5ef" stroke-width="2"/><g class="kflag"><path fill="#e2574c" d="M150 88 C157 85.5 163 91.5 172 90 C164 95.5 157 99 150 102Z"><animate attributeName="d" dur="1.8s" repeatCount="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".45 0 .55 1;.45 0 .55 1" values="M150 88 C157 85.5 163 91.5 172 90 C164 95.5 157 99 150 102Z;M150 88 C157 91 163 85.5 172 90.5 C164 93.5 157 100.5 150 102Z;M150 88 C157 85.5 163 91.5 172 90 C164 95.5 157 99 150 102Z"/></path></g>
  ${[104, 124, 166, 186].map(x => `<rect x="${x}" y="164" width="14" height="18" rx="2" fill="#2d8a7a"/>`).join("")}<rect x="140" y="186" width="20" height="26" rx="3" fill="#0b4a4a"/>${[78, 206].map(x => `<rect x="${x}" y="182" width="14" height="14" rx="2" fill="#2d8a7a"/>`).join("")}</g></g>
  <g class="rise r2"><g class="ktr"><rect x="34" y="180" width="5" height="32" fill="#0b4a4a"/><circle cx="36" cy="172" r="17" fill="#5bb98c"/><rect x="258" y="186" width="5" height="26" fill="#0b4a4a"/><circle cx="260" cy="178" r="14" fill="#2d8a7a"/></g></g>
- <rect x="0" y="212" width="300" height="38" fill="url(#gw)"/>
- <g><path d="M0 212 Q40 188 90 206 T190 204 T300 196 V214 H0z" fill="#5bb98c"/><path d="M0 220 Q70 204 150 218 T300 212 V232 H0z" fill="#2d8a7a" opacity=".8"/></g></svg>`;
+ <rect x="-400" y="212" width="1100" height="38" fill="url(#gw)"/>
+ <g><path d="M-400 212 H0 Q40 188 90 206 T190 204 T300 196 H700 V214 H-400z" fill="#5bb98c"/><path d="M-400 220 H0 Q70 204 150 218 T300 212 H700 V232 H-400z" fill="#2d8a7a" opacity=".8"/></g></svg>`;
 const CREDIT = `<div class="credit"><img src="logo.svg" alt="" width="24" height="24" decoding="async"><span>Designed by <b>Anmol Virk</b></span></div>`;
 /* the school scene follows the page: it rises with the scroll, clouds drift, the flag waves.
    --sp (0..1) is the scroll progress: the whole page on desktop (the panel stays in view), or how much of the panel has come into view on a phone (where it sits at the bottom). */
@@ -2697,6 +2703,7 @@ const CREDIT = `<div class="credit"><img src="logo.svg" alt="" width="24" height
   let q = 0;
   const upd = () => {
     q = 0; const sd = $("side"); if (!sd) return; let p = 1;
+    const sk = sd.querySelector(".sky"); if (sk && sk.pauseAnimations) { if (fxOn()) sk.unpauseAnimations(); else sk.pauseAnimations(); }
     if (fxOn()) { if (getComputedStyle(sd).position === "sticky") { const max = document.documentElement.scrollHeight - innerHeight; p = max > 40 ? scrollY / max : 1; } else { const r = sd.getBoundingClientRect(); p = (innerHeight - r.top) / Math.max(1, Math.min(r.height, innerHeight)); } }
     sd.style.setProperty("--sp", Math.min(1, Math.max(0, p)).toFixed(3));
   };
@@ -2709,7 +2716,7 @@ function renderSide() {
   const cls = myClasses().includes(H.cls) ? H.cls : myClasses()[0];
   const sideH = `<div class="sp"><div class="av big2">${esc(S.me.name[0].toUpperCase())}</div><b>${esc(S.me.name)}</b><small>${esc(roleLine())}</small><button class="btn pillbtn" data-a="profile">${ic("edit", 16)} Edit profile</button>
    <div class="sbox"><small>Class</small><b>${cls ? esc(cls) : "—"}</b><span class="arrow">${esc(todayLabel())}</span></div></div><h2 class="sch">${esc(S.cfg.school)}</h2>${SKY}${CREDIT}`;
-  if ($("side")._h !== sideH) { $("side")._h = sideH; $("side").innerHTML = sideH; }
+  if ($("side")._h !== sideH) { $("side")._h = sideH; $("side").innerHTML = sideH; const sk = $("side").querySelector(".sky"); if (sk && sk.pauseAnimations && !fxOn()) sk.pauseAnimations(); }
 }
 const todayLabel = () => new Date().toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" });
 $("avb").onclick = () => A.profile();
